@@ -1,0 +1,96 @@
+class DeviceConfig {
+  // General
+  final String deviceName;
+  final String wifiSsid;
+  final String displayOrientation;
+  final int displayRotationDeg;
+  final String timezone;
+  final String ntpServer;
+
+  // Auto Rotate
+  final bool autoRotate;
+  final int rotateInterval;
+  final bool autoRotateAligned;
+  final String rotationMode; // "storage" or "url"
+  final String sdRotationMode; // "sequential" or "random"
+  final String imageUrl;
+  final bool saveDownloadedImages;
+  final String accessToken;
+  final String httpHeaderKey;
+  final String httpHeaderValue;
+
+  // Sleep
+  final bool sleepScheduleEnabled;
+  final int sleepScheduleStart; // minutes from midnight
+  final int sleepScheduleEnd;
+
+  // Power
+  final bool deepSleepEnabled;
+
+  // Home Assistant
+  final String haUrl;
+
+  // AI
+  final String openaiApiKey;
+  final String googleApiKey;
+
+  const DeviceConfig({
+    required this.deviceName,
+    required this.wifiSsid,
+    required this.displayOrientation,
+    required this.displayRotationDeg,
+    required this.timezone,
+    required this.ntpServer,
+    required this.autoRotate,
+    required this.rotateInterval,
+    required this.autoRotateAligned,
+    required this.rotationMode,
+    required this.sdRotationMode,
+    required this.imageUrl,
+    required this.saveDownloadedImages,
+    required this.accessToken,
+    required this.httpHeaderKey,
+    required this.httpHeaderValue,
+    required this.sleepScheduleEnabled,
+    required this.sleepScheduleStart,
+    required this.sleepScheduleEnd,
+    required this.deepSleepEnabled,
+    required this.haUrl,
+    required this.openaiApiKey,
+    required this.googleApiKey,
+  });
+
+  factory DeviceConfig.fromJson(Map<String, dynamic> json) {
+    return DeviceConfig(
+      deviceName: json['device_name'] as String? ?? '',
+      wifiSsid: json['wifi_ssid'] as String? ?? '',
+      displayOrientation:
+          json['display_orientation'] as String? ?? 'landscape',
+      displayRotationDeg:
+          (json['display_rotation_deg'] as num?)?.toInt() ?? 0,
+      timezone: json['timezone'] as String? ?? '',
+      ntpServer: json['ntp_server'] as String? ?? '',
+      autoRotate: json['auto_rotate'] as bool? ?? false,
+      rotateInterval: (json['rotate_interval'] as num?)?.toInt() ?? 3600,
+      autoRotateAligned: json['auto_rotate_aligned'] as bool? ?? false,
+      rotationMode: json['rotation_mode'] as String? ?? 'storage',
+      sdRotationMode: json['sd_rotation_mode'] as String? ?? 'sequential',
+      imageUrl: json['image_url'] as String? ?? '',
+      saveDownloadedImages:
+          json['save_downloaded_images'] as bool? ?? false,
+      accessToken: json['access_token'] as String? ?? '',
+      httpHeaderKey: json['http_header_key'] as String? ?? '',
+      httpHeaderValue: json['http_header_value'] as String? ?? '',
+      sleepScheduleEnabled:
+          json['sleep_schedule_enabled'] as bool? ?? false,
+      sleepScheduleStart:
+          (json['sleep_schedule_start'] as num?)?.toInt() ?? 0,
+      sleepScheduleEnd:
+          (json['sleep_schedule_end'] as num?)?.toInt() ?? 0,
+      deepSleepEnabled: json['deep_sleep_enabled'] as bool? ?? false,
+      haUrl: json['ha_url'] as String? ?? '',
+      openaiApiKey: json['openai_api_key'] as String? ?? '',
+      googleApiKey: json['google_api_key'] as String? ?? '',
+    );
+  }
+}

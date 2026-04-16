@@ -1,0 +1,898 @@
+import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
+import 'package:provider/provider.dart';
+
+import '../providers/device_provider.dart';
+import '../services/epaper/image_processor.dart' as epaper;
+import '../services/epaper/presets.dart';
+
+/// Full image processing preview screen with adjustable parameters.
+class PreviewScreen extends StatefulWidget {
+  final Uint8List imageBytes;
+  final String filename;
+  final String? album;
+
+  const PreviewScreen({
+    super.key,
+    required this.imageBytes,
+    required this.filename,
+    this.album,
+  });
+
+  @override
+  State<PreviewScreen> createState() => _PreviewScreenState();
+}
+
+class _PreviewScreenState extends State<PreviewScreen> {
+  // Scale mode
+  epaper.ScaleMode _scaleMode = epaper.ScaleMode.cover;
+  String _backgroundColor = 'white';
+  double _zoom = 1.0;
+  double _panX = 0;
+  double _panY = 0;
+
+  // Processing params
+  String _presetName = 'balanced';
+  double _exposure = 1.0;
+  double _saturation = 1.0;
+  double _contrast = 1.0;
+  ToneMode _toneMode = ToneMode.contrast;
+  double _strength = 0.9;
+  double _shadowBoost = 0.0;
+  double _highlightCompress = 1.5;
+  double _midpoint = 0.5;
+  ColorMethod _colorMethod = ColorMethod.rgb;
+  DitherAlgorithm _ditherAlgorithm = DitherAlgorithm.floydSteinberg;
+  bool _compressDynamicRange = true;
+
+  // Source image (EXIF-corrected, decoded once)
+  int _srcWidth = 0;
+  int _srcHeight = 0;
+  Uint8List? _orientedSourceBytes; // EXIF-corrected PNG for live preview
+
+  // State
+  bool _initializing = true; // true until settings loaded and image decoded
+  bool _processing = false;
+  bool _uploading = false;
+  int _processGeneration = 0; // increments each processImage call to ignore stale results
+  bool _isTouching = false; // true while finger is down in custom mode
+  bool _isDragging = false; // true from first touch until dithered result arrives
+  Uint8List? _previewBytes;
+  Uint8List? _thumbnailJpg;
+  Uint8List? _epdgz;
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeviceSettings();
+  }
+
+  bool _deviceOffline = false;
+
+  Future<void> _loadDeviceSettings() async {
+    final api = context.read<DeviceProvider>().apiClient;
+
+    // Check device is online and load processing settings
+    if (api != null) {
+      try {
+        final settings = await api.getProcessingSettings()
+            .timeout(const Duration(seconds: 5));
+        if (mounted) _applyFromJson(settings);
+      } catch (_) {
+        // Device unreachable
+        if (mounted) {
+          setState(() => _deviceOffline = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Device is offline. Connect to device first.'),
+            ),
+          );
+          Navigator.pop(context);
+          return;
+        }
+      }
+    }
+
+    // Decode source image and apply EXIF orientation
+    final src = img.decodeImage(widget.imageBytes);
+    if (src != null) {
+      final oriented = img.bakeOrientation(src);
+      _srcWidth = oriented.width;
+      _srcHeight = oriented.height;
+      _orientedSourceBytes = Uint8List.fromList(img.encodePng(oriented));
+    }
+    // Auto-select scale mode based on image vs display orientation
+    if (_srcWidth > 0 && _srcHeight > 0) {
+      final (fw, fh) = _displayDims;
+      final imageIsLandscape = _srcWidth > _srcHeight;
+      final displayIsLandscape = fw > fh;
+      if (imageIsLandscape != displayIsLandscape) {
+        _scaleMode = epaper.ScaleMode.fit;
+      }
+    }
+
+    if (mounted) setState(() => _initializing = false);
+
+    // Start dithering with device settings
+    _processImage();
+  }
+
+  void _applyFromJson(Map<String, dynamic> json) {
+    setState(() {
+      _presetName = 'custom';
+      _exposure = (json['exposure'] as num?)?.toDouble() ?? 1.0;
+      _saturation = (json['saturation'] as num?)?.toDouble() ?? 1.0;
+      _contrast = (json['contrast'] as num?)?.toDouble() ?? 1.0;
+      _toneMode = json['toneMode'] == 'scurve'
+          ? ToneMode.scurve
+          : ToneMode.contrast;
+      _strength = (json['strength'] as num?)?.toDouble() ?? 0.9;
+      _shadowBoost = (json['shadowBoost'] as num?)?.toDouble() ?? 0.0;
+      _highlightCompress =
+          (json['highlightCompress'] as num?)?.toDouble() ?? 1.5;
+      _midpoint = (json['midpoint'] as num?)?.toDouble() ?? 0.5;
+      _colorMethod = json['colorMethod'] == 'lab'
+          ? ColorMethod.lab
+          : ColorMethod.rgb;
+      _ditherAlgorithm = _parseDitherAlgorithm(
+          json['ditherAlgorithm'] as String? ?? 'floyd-steinberg');
+      _compressDynamicRange =
+          json['compressDynamicRange'] as bool? ?? true;
+
+      // Check if this matches a preset
+      for (final entry in presets.entries) {
+        final p = entry.value;
+        if (p.exposure == _exposure &&
+            p.saturation == _saturation &&
+            p.contrast == _contrast &&
+            p.toneMode == _toneMode &&
+            p.colorMethod == _colorMethod &&
+            p.ditherAlgorithm == _ditherAlgorithm &&
+            p.compressDynamicRange == _compressDynamicRange) {
+          _presetName = entry.key;
+          break;
+        }
+      }
+    });
+  }
+
+  DitherAlgorithm _parseDitherAlgorithm(String name) {
+    switch (name) {
+      case 'stucki':
+        return DitherAlgorithm.stucki;
+      case 'burkes':
+        return DitherAlgorithm.burkes;
+      case 'sierra':
+        return DitherAlgorithm.sierra;
+      default:
+        return DitherAlgorithm.floydSteinberg;
+    }
+  }
+
+  /// Get the effective display dimensions (accounting for orientation swap).
+  (int, int) get _displayDims {
+    final provider = context.read<DeviceProvider>();
+    final sysInfo = provider.systemInfo;
+    final config = provider.config;
+    var w = sysInfo?.displayWidth ?? 800;
+    var h = sysInfo?.displayHeight ?? 480;
+    final isPortrait = config?.displayOrientation == 'portrait';
+    if (isPortrait == (w > h)) {
+      final tmp = w;
+      w = h;
+      h = tmp;
+    }
+    return (w, h);
+  }
+
+  /// Initialize zoom/pan for custom mode: fit-inside-frame, centered.
+  void _initCustomZoomPan() {
+    if (_srcWidth == 0 || _srcHeight == 0) return;
+    final (fw, fh) = _displayDims;
+    final fitScale =
+        math.min(fw / _srcWidth, fh / _srcHeight).toDouble();
+    _zoom = fitScale;
+    _panX = (fw - _srcWidth * fitScale) / 2;
+    _panY = (fh - _srcHeight * fitScale) / 2;
+  }
+
+  double _lastScale = 1.0;
+
+  /// Build the dithered preview with fixed container matching display aspect ratio.
+  Widget _buildDitheredPreview() {
+    final (fw, fh) = _displayDims;
+    final containerWidth = MediaQuery.of(context).size.width - 32;
+    final containerHeight = containerWidth * fh / fw;
+
+    return SizedBox(
+      width: containerWidth,
+      height: containerHeight,
+      child: Image.memory(
+        _previewBytes!,
+        fit: BoxFit.fill,
+        filterQuality: FilterQuality.none,
+      ),
+    );
+  }
+
+  /// Build a live source preview for cover/fit modes while processing.
+  /// Shows the original image fitted to the display aspect ratio.
+  Widget _buildLiveSourcePreview() {
+    final (fw, fh) = _displayDims;
+    final containerWidth = MediaQuery.of(context).size.width - 32;
+    final containerHeight = containerWidth * fh / fw;
+
+    final bgColor = _backgroundColor == 'black' ? Colors.black : Colors.white;
+
+    return SizedBox(
+      width: containerWidth,
+      height: containerHeight,
+      child: ColoredBox(
+        color: bgColor,
+        child: Image.memory(
+          _orientedSourceBytes ?? widget.imageBytes,
+          fit: _scaleMode == epaper.ScaleMode.cover
+              ? BoxFit.cover
+              : BoxFit.contain,
+        ),
+      ),
+    );
+  }
+
+  /// Build a live preview showing the original image at current zoom/pan.
+  /// Used during custom mode dragging for instant visual feedback.
+  ///
+  /// The processor places the image at (panX, panY) with size
+  /// (srcW * zoom, srcH * zoom) in a (displayW x displayH) frame.
+  /// We map this to screen coordinates proportionally.
+  Widget _buildLiveCustomPreview() {
+    final (fw, fh) = _displayDims;
+    // Container fills available width, height follows aspect ratio
+    final containerWidth = MediaQuery.of(context).size.width - 32;
+    final containerHeight = containerWidth * fh / fw;
+    // display-to-screen ratio
+    final s = containerWidth / fw;
+
+    final bgColor = _backgroundColor == 'black' ? Colors.black : Colors.white;
+
+    // Image size and position in screen coords
+    final imgW = _srcWidth * _zoom * s;
+    final imgH = _srcHeight * _zoom * s;
+    final imgX = _panX * s;
+    final imgY = _panY * s;
+
+    return SizedBox(
+      width: containerWidth,
+      height: containerHeight,
+      child: ClipRect(
+        child: ColoredBox(
+          color: bgColor,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: imgX,
+                top: imgY,
+                width: imgW,
+                height: imgH,
+                child: Image.memory(
+                  _orientedSourceBytes ?? widget.imageBytes,
+                  fit: BoxFit.fill,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _onCustomScaleUpdate(ScaleUpdateDetails details) {
+    final (fw, fh) = _displayDims;
+    final screenWidth = MediaQuery.of(context).size.width - 32;
+    // Screen-to-display ratio
+    final ratio = fw / screenWidth;
+
+    setState(() {
+      _isDragging = true;
+
+      // Pan: convert screen delta to display coords
+      _panX += details.focalPointDelta.dx * ratio;
+      _panY += details.focalPointDelta.dy * ratio;
+
+      // Pinch zoom around focal point
+      if (details.scale != 1.0) {
+        final zoomFactor = details.scale / _lastScale;
+        final fitScale =
+            math.min(fw / _srcWidth, fh / _srcHeight).toDouble();
+        final maxZoom =
+            math.max(fw / _srcWidth, fh / _srcHeight).toDouble() * 5;
+        final newZoom = (_zoom * zoomFactor).clamp(fitScale * 0.25, maxZoom);
+
+        // Adjust pan to keep the focal point fixed
+        // Focal point in display coords
+        final focalX = details.localFocalPoint.dx * ratio;
+        final focalY = details.localFocalPoint.dy * ratio;
+
+        // The focal point maps to (focalX - panX) / (srcW * zoom) in image space
+        // After zoom change, we want this ratio preserved:
+        // (focalX - newPanX) / (srcW * newZoom) = (focalX - panX) / (srcW * zoom)
+        // => newPanX = focalX - (focalX - panX) * newZoom / zoom
+        _panX = focalX - (focalX - _panX) * newZoom / _zoom;
+        _panY = focalY - (focalY - _panY) * newZoom / _zoom;
+        _zoom = newZoom;
+      }
+      _lastScale = details.scale;
+    });
+    // No debounce — only process on finger lift (onScaleEnd)
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _applyPreset(String name) {
+    final preset = presets[name];
+    if (preset == null) return;
+    setState(() {
+      _presetName = name;
+      _exposure = preset.exposure;
+      _saturation = preset.saturation;
+      _contrast = preset.contrast;
+      _toneMode = preset.toneMode;
+      _strength = preset.strength;
+      _shadowBoost = preset.shadowBoost;
+      _highlightCompress = preset.highlightCompress;
+      _midpoint = preset.midpoint;
+      _colorMethod = preset.colorMethod;
+      _ditherAlgorithm = preset.ditherAlgorithm;
+      _compressDynamicRange = preset.compressDynamicRange;
+    });
+  }
+
+  ProcessingParams _buildParams() {
+    return ProcessingParams(
+      exposure: _exposure,
+      saturation: _saturation,
+      contrast: _contrast,
+      toneMode: _toneMode,
+      strength: _strength,
+      shadowBoost: _shadowBoost,
+      highlightCompress: _highlightCompress,
+      midpoint: _midpoint,
+      colorMethod: _colorMethod,
+      ditherAlgorithm: _ditherAlgorithm,
+      compressDynamicRange: _compressDynamicRange,
+    );
+  }
+
+  void _onParamChanged() {
+    _presetName = 'custom';
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), _processImage);
+  }
+
+  Future<void> _processImage({bool force = false}) async {
+    // Don't process while user is actively touching in custom mode
+    if (_isTouching && !force) return;
+
+    final generation = ++_processGeneration;
+    setState(() => _processing = true);
+
+    final provider = context.read<DeviceProvider>();
+    final sysInfo = provider.systemInfo;
+    final config = provider.config;
+    final nativeWidth = sysInfo?.displayWidth ?? 800;
+    final nativeHeight = sysInfo?.displayHeight ?? 480;
+    final orientation = config?.displayOrientation;
+    final params = _buildParams();
+
+    try {
+      // Run in background isolate to keep UI responsive
+      final result = await epaper.processImageInBackground(
+        widget.imageBytes,
+        nativeWidth: nativeWidth,
+        nativeHeight: nativeHeight,
+        orientation: orientation,
+        params: params,
+        scaleMode: _scaleMode,
+        backgroundColor: _backgroundColor,
+        zoom: _zoom,
+        panX: _panX,
+        panY: _panY,
+      );
+
+      if (!mounted) return;
+      // Ignore stale results from older processing runs
+      if (generation != _processGeneration) {
+        setState(() => _processing = false);
+        return;
+      }
+
+      setState(() {
+        _previewBytes = result.previewPng;
+        _epdgz = result.epdgz;
+        _thumbnailJpg = result.thumbnailJpg;
+        _processing = false;
+        // Only clear drag state if not currently in custom mode drag
+        if (!_isTouching) _isDragging = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _processing = false;
+        if (!_isTouching) _isDragging = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Processing failed: $e')),
+      );
+    }
+  }
+
+  void _showSendingDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: Center(
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(message),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Display on frame — stays in editor after completion.
+  Future<void> _displayImage() async {
+    if (_epdgz == null) return;
+    final api = context.read<DeviceProvider>().apiClient;
+    if (api == null) return;
+
+    setState(() => _uploading = true);
+    _showSendingDialog('Sending to display...');
+
+    try {
+      await api.displayImage(
+        _epdgz!,
+        '${widget.filename}.epdgz',
+      );
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss spinner
+      setState(() => _uploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Image displayed')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss spinner
+      setState(() => _uploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: $e')),
+      );
+    }
+  }
+
+  /// Upload to album — closes editor after completion.
+  Future<void> _uploadToAlbum() async {
+    if (_epdgz == null || _thumbnailJpg == null) return;
+    final api = context.read<DeviceProvider>().apiClient;
+    if (api == null) return;
+
+    final album = widget.album ?? 'Default';
+
+    setState(() => _uploading = true);
+    _showSendingDialog('Uploading to album...');
+
+    try {
+      // Strip original extension and use .epdgz
+      final baseName = widget.filename.contains('.')
+          ? widget.filename.substring(0, widget.filename.lastIndexOf('.'))
+          : widget.filename;
+
+      await api.uploadImage(
+        album,
+        _epdgz!,
+        '$baseName.epdgz',
+        thumbnailBytes: _thumbnailJpg,
+        thumbnailFilename: '$baseName.jpg',
+      );
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss spinner
+      Navigator.pop(context, true); // close editor
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Image uploaded')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss spinner
+      setState(() => _uploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Upload failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_initializing) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Image Processing')),
+        body: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Loading...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Image Processing'),
+        actions: [
+          IconButton(
+            onPressed: _epdgz != null && !_uploading ? _displayImage : null,
+            icon: const Icon(Icons.cast),
+            tooltip: 'Display on frame',
+          ),
+          IconButton(
+            onPressed: _epdgz != null && !_uploading ? _uploadToAlbum : null,
+            icon: const Icon(Icons.upload),
+            tooltip: 'Upload to album',
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: ListView(
+        physics: _isTouching
+            ? const NeverScrollableScrollPhysics()
+            : null,
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Preview image — always show something
+          if (true) ...[
+            Stack(
+              alignment: Alignment.topRight,
+              children: [
+                GestureDetector(
+                  onScaleStart: _scaleMode == epaper.ScaleMode.custom
+                      ? (_) {
+                          _debounce?.cancel();
+                          setState(() {
+                            _isTouching = true;
+                            _isDragging = true;
+                            _lastScale = 1.0;
+                          });
+                        }
+                      : null,
+                  onScaleUpdate: _scaleMode == epaper.ScaleMode.custom
+                      ? _onCustomScaleUpdate
+                      : null,
+                  onScaleEnd: _scaleMode == epaper.ScaleMode.custom
+                      ? (_) {
+                          _debounce?.cancel();
+                          setState(() => _isTouching = false);
+                          _processImage(force: true);
+                        }
+                      : null,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: () {
+                      // Custom mode drag: show live pan/zoom preview
+                      if (_isDragging && _scaleMode == epaper.ScaleMode.custom && _srcWidth > 0) {
+                        return _buildLiveCustomPreview();
+                      }
+                      // Dithered result available: show it
+                      if (_previewBytes != null && !_processing) {
+                        return _buildDitheredPreview();
+                      }
+                      // Processing in progress: show source with spinner overlay
+                      if (_srcWidth > 0) {
+                        return _buildLiveSourcePreview();
+                      }
+                      // Nothing decoded yet: show raw image at display aspect ratio
+                      final (fw, fh) = _displayDims;
+                      final cw = MediaQuery.of(context).size.width - 32;
+                      return SizedBox(
+                        width: cw,
+                        height: cw * fh / fw,
+                        child: Image.memory(
+                          widget.imageBytes,
+                          fit: BoxFit.cover,
+                        ),
+                      );
+                    }(),
+                  ),
+                ),
+                if (_processing && !_isTouching)
+                  const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: SizedBox(
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // Scale mode
+          Text('Layout', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          SegmentedButton<epaper.ScaleMode>(
+            segments: const [
+              ButtonSegment(
+                value: epaper.ScaleMode.cover,
+                label: Text('Cover'),
+                icon: Icon(Icons.crop),
+              ),
+              ButtonSegment(
+                value: epaper.ScaleMode.fit,
+                label: Text('Fit'),
+                icon: Icon(Icons.fit_screen),
+              ),
+              ButtonSegment(
+                value: epaper.ScaleMode.custom,
+                label: Text('Custom'),
+                icon: Icon(Icons.pan_tool),
+              ),
+            ],
+            selected: {_scaleMode},
+            onSelectionChanged: (v) {
+              _debounce?.cancel();
+              final mode = v.first;
+              setState(() {
+                _scaleMode = mode;
+                if (mode == epaper.ScaleMode.custom) {
+                  _initCustomZoomPan();
+                  _isDragging = true; // show live preview immediately
+                  _processGeneration++; // invalidate any in-flight processing
+                }
+              });
+              // For cover/fit, dither immediately. For custom, wait for finger lift.
+              if (mode != epaper.ScaleMode.custom) {
+                _processImage();
+              }
+            },
+          ),
+          // Custom mode: drag & pinch instructions
+          if (_scaleMode == epaper.ScaleMode.custom)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Drag to pan, pinch to zoom on the preview above',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+          // Background color (only for fit/custom)
+          if (_scaleMode != epaper.ScaleMode.cover) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text('Background',
+                    style: Theme.of(context).textTheme.bodyMedium),
+                const Spacer(),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'white', label: Text('White')),
+                    ButtonSegment(value: 'black', label: Text('Black')),
+                  ],
+                  selected: {_backgroundColor},
+                  onSelectionChanged: (v) {
+                    setState(() => _backgroundColor = v.first);
+                    _onParamChanged();
+                  },
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 16),
+
+          // Preset selector
+          Text('Preset', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              ...presets.keys.map((name) => FilterChip(
+                    label: Text(name[0].toUpperCase() + name.substring(1)),
+                    selected: _presetName == name,
+                    onSelected: (_) {
+                      _applyPreset(name);
+                      _processImage();
+                    },
+                  )),
+              FilterChip(
+                label: const Text('Custom'),
+                selected: _presetName == 'custom',
+                onSelected: null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Dithering algorithm
+          _buildDropdown<DitherAlgorithm>(
+            'Dithering Algorithm',
+            _ditherAlgorithm,
+            {
+              DitherAlgorithm.floydSteinberg: 'Floyd-Steinberg',
+              DitherAlgorithm.stucki: 'Stucki',
+              DitherAlgorithm.burkes: 'Burkes',
+              DitherAlgorithm.sierra: 'Sierra',
+            },
+            (v) {
+              setState(() => _ditherAlgorithm = v);
+              _onParamChanged();
+            },
+          ),
+          const SizedBox(height: 8),
+
+          // Color method
+          _buildDropdown<ColorMethod>(
+            'Color Matching',
+            _colorMethod,
+            {
+              ColorMethod.rgb: 'RGB',
+              ColorMethod.lab: 'LAB',
+            },
+            (v) {
+              setState(() => _colorMethod = v);
+              _onParamChanged();
+            },
+          ),
+          const SizedBox(height: 16),
+
+          // Exposure
+          _buildSlider('Exposure', _exposure, 0.5, 2.0, (v) {
+            setState(() => _exposure = v);
+            _onParamChanged();
+          }),
+
+          // Saturation
+          _buildSlider('Saturation', _saturation, 0.0, 2.0, (v) {
+            setState(() => _saturation = v);
+            _onParamChanged();
+          }),
+
+          // Tone mode
+          _buildDropdown<ToneMode>(
+            'Tone Mapping',
+            _toneMode,
+            {
+              ToneMode.contrast: 'Contrast',
+              ToneMode.scurve: 'S-Curve',
+            },
+            (v) {
+              setState(() => _toneMode = v);
+              _onParamChanged();
+            },
+          ),
+          const SizedBox(height: 8),
+
+          // Contrast (only in contrast mode)
+          if (_toneMode == ToneMode.contrast)
+            _buildSlider('Contrast', _contrast, 0.5, 2.0, (v) {
+              setState(() => _contrast = v);
+              _onParamChanged();
+            }),
+
+          // S-curve params (only in scurve mode)
+          if (_toneMode == ToneMode.scurve) ...[
+            _buildSlider('Strength', _strength, 0.0, 1.0, (v) {
+              setState(() => _strength = v);
+              _onParamChanged();
+            }),
+            _buildSlider('Shadow Boost', _shadowBoost, 0.0, 1.0, (v) {
+              setState(() => _shadowBoost = v);
+              _onParamChanged();
+            }),
+            _buildSlider(
+                'Highlight Compress', _highlightCompress, 0.5, 5.0, (v) {
+              setState(() => _highlightCompress = v);
+              _onParamChanged();
+            }),
+            _buildSlider('Midpoint', _midpoint, 0.3, 0.7, (v) {
+              setState(() => _midpoint = v);
+              _onParamChanged();
+            }),
+          ],
+
+          // Compress dynamic range
+          SwitchListTile(
+            title: const Text('Compress Dynamic Range'),
+            subtitle: const Text(
+                'Map brightness to display\'s actual white/black point'),
+            value: _compressDynamicRange,
+            contentPadding: EdgeInsets.zero,
+            onChanged: (v) {
+              setState(() => _compressDynamicRange = v);
+              _onParamChanged();
+            },
+          ),
+
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSlider(
+    String label,
+    double value,
+    double min,
+    double max,
+    ValueChanged<double> onChanged,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            Text(value.toStringAsFixed(2),
+                style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+        Slider(
+          value: value,
+          min: min,
+          max: max,
+          onChanged: onChanged,
+          onChangeEnd: (_) {}, // debounce handles reprocess
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDropdown<T>(
+    String label,
+    T value,
+    Map<T, String> options,
+    ValueChanged<T> onChanged,
+  ) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        DropdownButton<T>(
+          value: value,
+          underline: const SizedBox(),
+          items: options.entries
+              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+              .toList(),
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+        ),
+      ],
+    );
+  }
+}

@@ -1,0 +1,56 @@
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import 'providers/device_provider.dart';
+import 'screens/discovery_screen.dart';
+import 'screens/gallery_screen.dart';
+import 'screens/settings_screen.dart';
+
+void main() {
+  runApp(const PhotoFrameApp());
+}
+
+final _router = GoRouter(
+  initialLocation: '/',
+  routes: [
+    GoRoute(
+      path: '/',
+      builder: (context, state) => const DiscoveryScreen(),
+    ),
+    GoRoute(
+      path: '/gallery',
+      builder: (context, state) => const GalleryScreen(),
+    ),
+    GoRoute(
+      path: '/settings',
+      builder: (context, state) => const SettingsScreen(),
+    ),
+  ],
+);
+
+class PhotoFrameApp extends StatelessWidget {
+  const PhotoFrameApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => DeviceProvider(),
+      child: MaterialApp.router(
+        title: 'ESP32 PhotoFrame',
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+          useMaterial3: true,
+        ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.teal,
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
+        ),
+        routerConfig: _router,
+      ),
+    );
+  }
+}

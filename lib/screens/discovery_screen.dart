@@ -8,6 +8,7 @@ import '../models/device.dart';
 import '../providers/device_provider.dart';
 import '../services/device_discovery.dart';
 import '../services/saved_devices.dart';
+import 'provisioning_screen.dart';
 
 class DiscoveryScreen extends StatefulWidget {
   const DiscoveryScreen({super.key});
@@ -130,7 +131,20 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Connect to PhotoFrame')),
+      appBar: AppBar(
+        title: const Text('ESP32 PhotoFrame'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            tooltip: 'Set up new device',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const ProvisioningScreen()),
+            ),
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

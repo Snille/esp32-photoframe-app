@@ -1,0 +1,426 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:wifi_iot/wifi_iot.dart';
+import 'package:wifi_scan/wifi_scan.dart';
+
+/// WiFi provisioning flow for new ESP32 PhotoFrame devices.
+///
+/// Steps:
+/// 1. Scan for "PhotoFrame" hotspots
+/// 2. Connect to selected hotspot
+/// 3. Fetch available WiFi networks from device
+/// 4. User selects network, enters password + device name
+/// 5. Submit credentials, device restarts
+class ProvisioningScreen extends StatefulWidget {
+  const ProvisioningScreen({super.key});
+
+  @override
+  State<ProvisioningScreen> createState() => _ProvisioningScreenState();
+}
+
+enum _ProvisionStep { scanning, connecting, configuring, saving, done, error }
+
+class _ProvisioningScreenState extends State<ProvisioningScreen> {
+  _ProvisionStep _step = _ProvisionStep.scanning;
+  String _statusMessage = 'Scanning for PhotoFrame devices...';
+  String? _errorMessage;
+
+  // Step 1: Hotspot scan results
+  List<WiFiAccessPoint> _hotspots = [];
+
+  // Step 3: WiFi networks from device
+  List<dynamic> _wifiNetworks = [];
+  String? _selectedSsid;
+  final _passwordController = TextEditingController();
+  final _deviceNameController = TextEditingController(text: 'PhotoFrame');
+  bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _startScan();
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _deviceNameController.dispose();
+    super.dispose();
+  }
+
+  // Step 1: Scan for PhotoFrame hotspots
+  Future<void> _startScan() async {
+    setState(() {
+      _step = _ProvisionStep.scanning;
+      _statusMessage = 'Scanning for PhotoFrame devices...';
+      _hotspots = [];
+    });
+
+    final scanner = WiFiScan.instance;
+    final canScan = await scanner.canStartScan();
+    if (canScan != CanStartScan.yes) {
+      setState(() {
+        _step = _ProvisionStep.error;
+        _errorMessage = 'Cannot start WiFi scan. Please enable WiFi and location services.';
+      });
+      return;
+    }
+
+    await scanner.startScan();
+    final results = await scanner.getScannedResults();
+
+    final photoframeHotspots = results
+        .where((ap) => ap.ssid.contains('PhotoFrame') && ap.ssid.contains('Setup'))
+        .toList();
+
+    if (!mounted) return;
+
+    if (photoframeHotspots.isEmpty) {
+      setState(() {
+        _step = _ProvisionStep.error;
+        _errorMessage = 'No PhotoFrame setup hotspots found.\n\n'
+            'Make sure your PhotoFrame is in setup mode '
+            '(not yet configured or factory reset).';
+      });
+    } else {
+      setState(() {
+        _hotspots = photoframeHotspots;
+        _statusMessage = 'Found ${photoframeHotspots.length} device(s)';
+      });
+    }
+  }
+
+  // Step 2: Connect to selected hotspot
+  Future<void> _connectToHotspot(WiFiAccessPoint hotspot) async {
+    setState(() {
+      _step = _ProvisionStep.connecting;
+      _statusMessage = 'Connecting to ${hotspot.ssid}...';
+    });
+
+    try {
+      final connected = await WiFiForIoTPlugin.connect(
+        hotspot.ssid,
+        security: NetworkSecurity.NONE,
+        joinOnce: true,
+        withInternet: false,
+      );
+
+      if (!connected) {
+        if (mounted) {
+          setState(() {
+            _step = _ProvisionStep.error;
+            _errorMessage = 'Failed to connect to ${hotspot.ssid}';
+          });
+        }
+        return;
+      }
+
+      // Wait for connection to stabilize
+      await Future.delayed(const Duration(seconds: 3));
+
+      // Force traffic through WiFi (Android may prefer cellular)
+      await WiFiForIoTPlugin.forceWifiUsage(true);
+
+      // Fetch available WiFi networks from the device
+      await _fetchWifiNetworks();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _step = _ProvisionStep.error;
+          _errorMessage = 'Connection error: $e';
+        });
+      }
+    }
+  }
+
+  // Step 3: Fetch WiFi networks from device
+  Future<void> _fetchWifiNetworks() async {
+    setState(() {
+      _statusMessage = 'Scanning WiFi networks...';
+    });
+
+    try {
+      final response = await http
+          .get(Uri.parse('http://192.168.4.1/api/wifi/scan'))
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final networks = jsonDecode(response.body) as List<dynamic>;
+        // Sort by signal strength
+        networks.sort((a, b) =>
+            (b['rssi'] as int? ?? -100).compareTo(a['rssi'] as int? ?? -100));
+
+        if (mounted) {
+          setState(() {
+            _wifiNetworks = networks;
+            _step = _ProvisionStep.configuring;
+            _statusMessage = 'Select your WiFi network';
+          });
+        }
+      } else {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _step = _ProvisionStep.error;
+          _errorMessage = 'Failed to fetch WiFi networks from device: $e';
+        });
+      }
+    }
+  }
+
+  // Step 4: Submit credentials
+  Future<void> _submitCredentials() async {
+    if (_selectedSsid == null || _selectedSsid!.isEmpty) return;
+
+    setState(() {
+      _step = _ProvisionStep.saving;
+      _statusMessage = 'Configuring device...';
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://192.168.4.1/save'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {
+          'ssid': _selectedSsid!,
+          'password': _passwordController.text,
+          'deviceName': _deviceNameController.text.trim().isEmpty
+              ? 'PhotoFrame'
+              : _deviceNameController.text.trim(),
+        },
+      ).timeout(const Duration(seconds: 20));
+
+      // Restore normal WiFi routing
+      await WiFiForIoTPlugin.forceWifiUsage(false);
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200 &&
+          response.body.toLowerCase().contains('success')) {
+        setState(() {
+          _step = _ProvisionStep.done;
+          _statusMessage = 'Device configured successfully!\n\n'
+              'The device will restart and connect to your WiFi network. '
+              'It should appear in your device list shortly.';
+        });
+      } else {
+        setState(() {
+          _step = _ProvisionStep.error;
+          _errorMessage = 'Device returned an error. '
+              'Please check the credentials and try again.';
+        });
+      }
+    } catch (e) {
+      // Restore normal WiFi routing even on error
+      await WiFiForIoTPlugin.forceWifiUsage(false);
+
+      if (mounted) {
+        // A timeout here might actually mean success — the device restarts
+        // and drops the connection before sending the response
+        setState(() {
+          _step = _ProvisionStep.done;
+          _statusMessage = 'Credentials sent!\n\n'
+              'The device should restart and connect to your WiFi network. '
+              'It should appear in your device list shortly.';
+        });
+      }
+    }
+  }
+
+  int _signalIcon(int? rssi) {
+    if (rssi == null) return 0;
+    if (rssi >= -50) return 4;
+    if (rssi >= -60) return 3;
+    if (rssi >= -70) return 2;
+    return 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Set Up New Device')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: _buildBody(),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    switch (_step) {
+      case _ProvisionStep.scanning:
+        return _hotspots.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    Text(_statusMessage),
+                  ],
+                ),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_statusMessage,
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  const Text('Tap a device to begin setup:'),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: _hotspots.length,
+                      itemBuilder: (context, index) {
+                        final ap = _hotspots[index];
+                        return ListTile(
+                          leading: const Icon(Icons.image),
+                          title: Text(ap.ssid),
+                          subtitle: Text('Signal: ${ap.level} dBm'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _connectToHotspot(ap),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              );
+
+      case _ProvisionStep.connecting:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(_statusMessage),
+            ],
+          ),
+        );
+
+      case _ProvisionStep.configuring:
+        return ListView(
+          children: [
+            Text('WiFi Network',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            ..._wifiNetworks.map((network) {
+              final ssid = network['ssid'] as String? ?? '';
+              final rssi = network['rssi'] as int?;
+              final authMode = network['authmode'] as int? ?? 0;
+              if (ssid.isEmpty) return const SizedBox.shrink();
+              final isSelected = _selectedSsid == ssid;
+              return ListTile(
+                leading: Icon(
+                  _signalIcon(rssi) >= 3
+                      ? Icons.wifi
+                      : _signalIcon(rssi) >= 2
+                          ? Icons.wifi_2_bar
+                          : Icons.wifi_1_bar,
+                ),
+                title: Text(ssid),
+                subtitle: Text('${rssi ?? "?"} dBm${authMode > 0 ? ' \u2022 Secured' : ''}'),
+                trailing: isSelected
+                    ? Icon(Icons.check_circle,
+                        color: Theme.of(context).colorScheme.primary)
+                    : null,
+                selected: isSelected,
+                onTap: () => setState(() => _selectedSsid = ssid),
+              );
+            }),
+            const SizedBox(height: 16),
+            if (_selectedSsid != null) ...[
+              TextField(
+                controller: _passwordController,
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
+                  labelText: 'WiFi Password',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscurePassword
+                        ? Icons.visibility
+                        : Icons.visibility_off),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _deviceNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Device Name',
+                  border: OutlineInputBorder(),
+                  hintText: 'PhotoFrame',
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _submitCredentials,
+                icon: const Icon(Icons.send),
+                label: const Text('Configure Device'),
+              ),
+            ],
+          ],
+        );
+
+      case _ProvisionStep.saving:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(_statusMessage),
+            ],
+          ),
+        );
+
+      case _ProvisionStep.done:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.check_circle,
+                  size: 64, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(height: 16),
+              Text(_statusMessage, textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Done'),
+              ),
+            ],
+          ),
+        );
+
+      case _ProvisionStep.error:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline,
+                  size: 64, color: Theme.of(context).colorScheme.error),
+              const SizedBox(height: 16),
+              Text(_errorMessage ?? 'Unknown error',
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: _startScan,
+                child: const Text('Retry'),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        );
+    }
+  }
+}

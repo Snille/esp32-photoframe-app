@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -7,12 +8,8 @@ import 'package:wifi_scan/wifi_scan.dart';
 
 /// WiFi provisioning flow for new ESP32 PhotoFrame devices.
 ///
-/// Steps:
-/// 1. Scan for "PhotoFrame" hotspots
-/// 2. Connect to selected hotspot
-/// 3. Fetch available WiFi networks from device
-/// 4. User selects network, enters password + device name
-/// 5. Submit credentials, device restarts
+/// Android: Scan for hotspots → connect → configure
+/// iOS: Ask user to connect manually in Settings → detect connection → configure
 class ProvisioningScreen extends StatefulWidget {
   const ProvisioningScreen({super.key});
 
@@ -20,14 +17,14 @@ class ProvisioningScreen extends StatefulWidget {
   State<ProvisioningScreen> createState() => _ProvisioningScreenState();
 }
 
-enum _ProvisionStep { scanning, connecting, configuring, saving, done, error }
+enum _ProvisionStep { scanning, waitingForManualConnect, connecting, configuring, saving, done, error }
 
-class _ProvisioningScreenState extends State<ProvisioningScreen> {
+class _ProvisioningScreenState extends State<ProvisioningScreen> with WidgetsBindingObserver {
   _ProvisionStep _step = _ProvisionStep.scanning;
-  String _statusMessage = 'Scanning for PhotoFrame devices...';
+  String _statusMessage = '';
   String? _errorMessage;
 
-  // Step 1: Hotspot scan results
+  // Step 1: Hotspot scan results (Android only)
   List<WiFiAccessPoint> _hotspots = [];
 
   // Step 3: WiFi networks from device
@@ -37,21 +34,88 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
   final _deviceNameController = TextEditingController(text: 'PhotoFrame');
   bool _obscurePassword = true;
 
+  bool get _isIOS => Platform.isIOS;
+
   @override
   void initState() {
     super.initState();
-    _startScan();
+    WidgetsBinding.instance.addObserver(this);
+    _startProvisioning();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _passwordController.dispose();
     _deviceNameController.dispose();
     super.dispose();
   }
 
-  // Step 1: Scan for PhotoFrame hotspots
-  Future<void> _startScan() async {
+  // Detect when user returns from Settings (iOS)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _step == _ProvisionStep.waitingForManualConnect) {
+      _checkIfConnectedToPhotoFrame();
+    }
+  }
+
+  void _startProvisioning() {
+    if (_isIOS) {
+      _startIOSFlow();
+    } else {
+      _startAndroidScan();
+    }
+  }
+
+  // === iOS Flow ===
+
+  void _startIOSFlow() {
+    setState(() {
+      _step = _ProvisionStep.waitingForManualConnect;
+      _statusMessage = 'Connect to your PhotoFrame\'s WiFi hotspot';
+    });
+  }
+
+  Future<void> _checkIfConnectedToPhotoFrame() async {
+    setState(() {
+      _statusMessage = 'Checking connection...';
+    });
+
+    // Try to reach the device at the AP address
+    try {
+      final response = await http
+          .get(Uri.parse('http://192.168.4.1/api/keep_alive'))
+          .timeout(const Duration(seconds: 3));
+
+      if (response.statusCode == 200) {
+        // Connected to PhotoFrame!
+        await _fetchWifiNetworks();
+      } else {
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Connect to your PhotoFrame\'s WiFi hotspot';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Not connected to a PhotoFrame hotspot yet')),
+          );
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _statusMessage = 'Connect to your PhotoFrame\'s WiFi hotspot';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Not connected to a PhotoFrame hotspot yet')),
+        );
+      }
+    }
+  }
+
+  // === Android Flow ===
+
+  Future<void> _startAndroidScan() async {
     setState(() {
       _step = _ProvisionStep.scanning;
       _statusMessage = 'Scanning for PhotoFrame devices...';
@@ -69,7 +133,6 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
     }
 
     await scanner.startScan();
-    // Wait for scan to complete before reading results
     await Future.delayed(const Duration(seconds: 3));
     final results = await scanner.getScannedResults();
 
@@ -94,7 +157,8 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
     }
   }
 
-  // Step 2: Connect to selected hotspot
+  // === Common Flow ===
+
   Future<void> _connectToHotspot(WiFiAccessPoint hotspot) async {
     setState(() {
       _step = _ProvisionStep.connecting;
@@ -119,13 +183,8 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
         return;
       }
 
-      // Wait for connection to stabilize
       await Future.delayed(const Duration(seconds: 3));
-
-      // Force traffic through WiFi (Android may prefer cellular)
       await WiFiForIoTPlugin.forceWifiUsage(true);
-
-      // Fetch available WiFi networks from the device
       await _fetchWifiNetworks();
     } catch (e) {
       if (mounted) {
@@ -137,9 +196,9 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
     }
   }
 
-  // Step 3: Fetch WiFi networks from device
   Future<void> _fetchWifiNetworks() async {
     setState(() {
+      _step = _ProvisionStep.connecting;
       _statusMessage = 'Scanning WiFi networks...';
     });
 
@@ -150,7 +209,6 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
 
       if (response.statusCode == 200) {
         final networks = jsonDecode(response.body) as List<dynamic>;
-        // Sort by signal strength
         networks.sort((a, b) =>
             (b['rssi'] as int? ?? -100).compareTo(a['rssi'] as int? ?? -100));
 
@@ -174,7 +232,6 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
     }
   }
 
-  // Step 4: Submit credentials
   Future<void> _submitCredentials() async {
     if (_selectedSsid == null || _selectedSsid!.isEmpty) return;
 
@@ -196,8 +253,9 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
         },
       ).timeout(const Duration(seconds: 20));
 
-      // Restore normal WiFi routing
-      await WiFiForIoTPlugin.forceWifiUsage(false);
+      if (!_isIOS) {
+        await WiFiForIoTPlugin.forceWifiUsage(false);
+      }
 
       if (!mounted) return;
 
@@ -217,12 +275,11 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
         });
       }
     } catch (e) {
-      // Restore normal WiFi routing even on error
-      await WiFiForIoTPlugin.forceWifiUsage(false);
+      if (!_isIOS) {
+        await WiFiForIoTPlugin.forceWifiUsage(false);
+      }
 
       if (mounted) {
-        // A timeout here might actually mean success — the device restarts
-        // and drops the connection before sending the response
         setState(() {
           _step = _ProvisionStep.done;
           _statusMessage = 'Credentials sent!\n\n'
@@ -231,14 +288,6 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
         });
       }
     }
-  }
-
-  int _signalIcon(int? rssi) {
-    if (rssi == null) return 0;
-    if (rssi >= -50) return 4;
-    if (rssi >= -60) return 3;
-    if (rssi >= -70) return 2;
-    return 1;
   }
 
   @override
@@ -292,6 +341,37 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
                 ],
               );
 
+      case _ProvisionStep.waitingForManualConnect:
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_find, size: 64),
+              const SizedBox(height: 24),
+              Text(_statusMessage,
+                  style: Theme.of(context).textTheme.titleMedium,
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              const Text(
+                'Go to Settings → Wi-Fi and connect to a network\n'
+                'starting with "PhotoFrame - ", then return here.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: _checkIfConnectedToPhotoFrame,
+                icon: const Icon(Icons.refresh),
+                label: const Text('I\'ve Connected'),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        );
+
       case _ProvisionStep.connecting:
         return Center(
           child: Column(
@@ -318,9 +398,9 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
               final isSelected = _selectedSsid == ssid;
               return ListTile(
                 leading: Icon(
-                  _signalIcon(rssi) >= 3
+                  rssi != null && rssi >= -60
                       ? Icons.wifi
-                      : _signalIcon(rssi) >= 2
+                      : rssi != null && rssi >= -70
                           ? Icons.wifi_2_bar
                           : Icons.wifi_1_bar,
                 ),
@@ -412,7 +492,7 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
                   textAlign: TextAlign.center),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _startScan,
+                onPressed: _startProvisioning,
                 child: const Text('Retry'),
               ),
               const SizedBox(height: 8),

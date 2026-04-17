@@ -15,12 +15,14 @@ class PreviewScreen extends StatefulWidget {
   final Uint8List imageBytes;
   final String filename;
   final String? album;
+  final Map<String, dynamic>? initialSettings;
 
   const PreviewScreen({
     super.key,
     required this.imageBytes,
     required this.filename,
     this.album,
+    this.initialSettings,
   });
 
   @override
@@ -72,30 +74,10 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _loadDeviceSettings();
   }
 
-  bool _deviceOffline = false;
-
   Future<void> _loadDeviceSettings() async {
-    final api = context.read<DeviceProvider>().apiClient;
-
-    // Check device is online and load processing settings
-    if (api != null) {
-      try {
-        final settings = await api.getProcessingSettings()
-            .timeout(const Duration(seconds: 5));
-        if (mounted) _applyFromJson(settings);
-      } catch (_) {
-        // Device unreachable
-        if (mounted) {
-          setState(() => _deviceOffline = true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Device is offline. Connect to device first.'),
-            ),
-          );
-          Navigator.pop(context);
-          return;
-        }
-      }
+    // Apply pre-fetched settings if available
+    if (widget.initialSettings != null) {
+      _applyFromJson(widget.initialSettings!);
     }
 
     // Decode source image and apply EXIF orientation

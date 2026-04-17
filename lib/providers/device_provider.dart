@@ -22,6 +22,10 @@ class DeviceProvider extends ChangeNotifier {
   bool _loading = false;
   String? _error;
   Timer? _keepAliveTimer;
+  int _keepAliveFailures = 0;
+  bool _deviceOffline = false;
+
+  bool get deviceOffline => _deviceOffline;
 
   Device? get device => _device;
   ApiClient? get apiClient => _apiClient;
@@ -59,6 +63,8 @@ class DeviceProvider extends ChangeNotifier {
     _apiClient = ApiClient(
         baseUrl: 'http://$apiHost:${device.port}');
     _error = null;
+    _keepAliveFailures = 0;
+    _deviceOffline = false;
     _startKeepAlive();
     notifyListeners();
   }
@@ -100,9 +106,18 @@ class DeviceProvider extends ChangeNotifier {
   Future<void> _sendKeepAlive() async {
     if (_apiClient == null) return;
     try {
-      await _apiClient!.keepAlive();
+      await _apiClient!.keepAlive().timeout(const Duration(seconds: 5));
+      _keepAliveFailures = 0;
+      if (_deviceOffline) {
+        _deviceOffline = false;
+        notifyListeners();
+      }
     } catch (_) {
-      // Silently ignore keep-alive failures
+      _keepAliveFailures++;
+      if (_keepAliveFailures >= 2 && !_deviceOffline) {
+        _deviceOffline = true;
+        notifyListeners();
+      }
     }
   }
 

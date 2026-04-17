@@ -398,6 +398,19 @@ class _GalleryScreenState extends State<GalleryScreen> {
     final battery = provider.batteryInfo;
     final sysInfo = provider.systemInfo;
 
+    // Navigate back if device goes offline
+    if (provider.deviceOffline) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          provider.disconnect();
+          context.go('/');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Device went offline')),
+          );
+        }
+      });
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: _isSelecting

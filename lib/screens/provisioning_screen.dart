@@ -72,7 +72,7 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
     final results = await scanner.getScannedResults();
 
     final photoframeHotspots = results
-        .where((ap) => ap.ssid.contains('PhotoFrame') && ap.ssid.contains('Setup'))
+        .where((ap) => ap.ssid.startsWith('PhotoFrame - '))
         .toList();
 
     if (!mounted) return;

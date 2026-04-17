@@ -238,6 +238,30 @@ class ApiClient {
     return jsonDecode(response.body);
   }
 
+  // --- Config Backup/Restore ---
+
+  Future<Map<String, dynamic>> getRawConfig() async {
+    final response = await _client.get(_uri('/api/config'));
+    _checkResponse(response);
+    return jsonDecode(response.body);
+  }
+
+  Future<void> setRawConfig(Map<String, dynamic> config) async {
+    final response = await _client.post(
+      _uri('/api/config'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(config),
+    );
+    _checkResponse(response);
+  }
+
+  // --- Factory Reset ---
+
+  Future<void> factoryReset() async {
+    final response = await _client.post(_uri('/api/factory-reset'));
+    _checkResponse(response);
+  }
+
   // --- Helpers ---
 
   void _checkResponse(http.Response response) {

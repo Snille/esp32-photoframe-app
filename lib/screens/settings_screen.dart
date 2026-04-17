@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -263,9 +266,27 @@ class SettingsScreen extends StatelessWidget {
                     ),
                   ),
                 ListTile(
+                  title: const Text('Export Config'),
+                  leading: const Icon(Icons.download),
+                  onTap: () => _exportConfig(context, provider),
+                ),
+                ListTile(
+                  title: const Text('Import Config'),
+                  leading: const Icon(Icons.upload),
+                  onTap: () => _importConfig(context, provider),
+                ),
+                ListTile(
                   title: const Text('Put Device to Sleep'),
                   leading: const Icon(Icons.bedtime),
                   onTap: () => _sleepDevice(context, provider),
+                ),
+                ListTile(
+                  title: Text('Factory Reset',
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.error)),
+                  leading: Icon(Icons.restore,
+                      color: Theme.of(context).colorScheme.error),
+                  onTap: () => _factoryReset(context, provider),
                 ),
                 const SizedBox(height: 24),
               ],
@@ -505,6 +526,124 @@ class SettingsScreen extends StatelessWidget {
         context.go('/');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Device is going to sleep')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _exportConfig(BuildContext context, DeviceProvider provider) async {
+    try {
+      final config = await provider.apiClient!.getRawConfig();
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(config);
+      await Clipboard.setData(ClipboardData(text: jsonStr));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Config copied to clipboard')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _importConfig(BuildContext context, DeviceProvider provider) async {
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Import Config'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Paste a previously exported config JSON:'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: '{"device_name": "...", ...}',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || controller.text.trim().isEmpty) return;
+
+    try {
+      final config = jsonDecode(controller.text.trim()) as Map<String, dynamic>;
+      await provider.apiClient!.setRawConfig(config);
+      await provider.refreshConfig();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Config imported successfully')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _factoryReset(BuildContext context, DeviceProvider provider) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Factory Reset'),
+        content: const Text(
+            'This will erase all settings and WiFi credentials. '
+            'The device will restart in setup mode.\n\n'
+            'This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await provider.apiClient!.factoryReset();
+      provider.disconnect();
+      if (context.mounted) {
+        context.go('/');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Device has been factory reset')),
         );
       }
     } catch (e) {

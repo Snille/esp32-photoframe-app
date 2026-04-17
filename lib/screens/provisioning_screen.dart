@@ -69,6 +69,8 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
     }
 
     await scanner.startScan();
+    // Wait for scan to complete before reading results
+    await Future.delayed(const Duration(seconds: 3));
     final results = await scanner.getScannedResults();
 
     final photoframeHotspots = results

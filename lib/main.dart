@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/device_provider.dart';
-import 'screens/discovery_screen.dart';
+import 'screens/devices_screen.dart';
 import 'screens/gallery_screen.dart';
 import 'screens/settings_screen.dart';
 

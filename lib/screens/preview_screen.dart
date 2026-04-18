@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 import 'package:provider/provider.dart';
 
@@ -64,7 +65,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
   bool _isTouching = false; // true while finger is down in custom mode
   bool _isDragging = false; // true from first touch until dithered result arrives
   Uint8List? _previewBytes;
-  Uint8List? _thumbnailJpg;
   Uint8List? _epdgz;
   Timer? _debounce;
 
@@ -407,7 +407,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
       setState(() {
         _previewBytes = result.previewPng;
         _epdgz = result.epdgz;
-        _thumbnailJpg = result.thumbnailJpg;
         _processing = false;
         // Only clear drag state if not currently in custom mode drag
         if (!_isTouching) _isDragging = false;
@@ -481,7 +480,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   /// Upload to album — closes editor after completion.
   Future<void> _uploadToAlbum() async {
-    if (_epdgz == null || _thumbnailJpg == null) return;
+    if (_epdgz == null) return;
     final api = context.read<DeviceProvider>().apiClient;
     if (api == null) return;
 
@@ -491,7 +490,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _showSendingDialog('Uploading to album...');
 
     try {
-      // Strip original extension and use .epdgz
+      // Generate high-quality thumbnail using native image compression
+      final thumbnailJpg = await FlutterImageCompress.compressWithList(
+        widget.imageBytes,
+        minWidth: 400,
+        minHeight: 400,
+        quality: 85,
+        format: CompressFormat.jpeg,
+      );
+
       final baseName = widget.filename.contains('.')
           ? widget.filename.substring(0, widget.filename.lastIndexOf('.'))
           : widget.filename;
@@ -500,7 +507,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
         album,
         _epdgz!,
         '$baseName.epdgz',
-        thumbnailBytes: _thumbnailJpg,
+        thumbnailBytes: thumbnailJpg,
         thumbnailFilename: '$baseName.jpg',
       );
       if (!mounted) return;

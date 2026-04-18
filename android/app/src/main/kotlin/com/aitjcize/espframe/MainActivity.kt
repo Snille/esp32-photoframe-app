@@ -1,4 +1,4 @@
-package com.aitjcize.esp32_photoframe_app
+package com.aitjcize.espframe
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -657,7 +657,8 @@ ProcessResultBytes _processInIsolate(_IsolateParams p) {
   final thumbScale = math.min(thumbMaxDim / origImg.width, thumbMaxDim / origImg.height);
   final thumbW = (origImg.width * thumbScale).round();
   final thumbH = (origImg.height * thumbScale).round();
-  final thumb = img.copyResize(origImg, width: thumbW, height: thumbH);
+  final thumb = img.copyResize(origImg, width: thumbW, height: thumbH,
+      interpolation: img.Interpolation.linear);
 
   return ProcessResultBytes(
     previewPng: Uint8List.fromList(img.encodePng(preview.processed)),
@@ -683,7 +684,8 @@ enum ScaleMode { cover, fit, custom }
   final output = img.Image(width: outW, height: outH);
   img.fill(output, color: img.ColorUint8.rgb(bgColor.r, bgColor.g, bgColor.b));
 
-  final scaled = img.copyResize(source, width: scaledW, height: scaledH);
+  final scaled = img.copyResize(source, width: scaledW, height: scaledH,
+      interpolation: img.Interpolation.linear);
   img.compositeImage(output, scaled, dstX: offsetX, dstY: offsetY);
 
   // Build background mask
@@ -716,7 +718,8 @@ enum ScaleMode { cover, fit, custom }
 
   // Scale source, then blit with clipping (handles negative offsets and overflow)
   if (scaledW > 0 && scaledH > 0) {
-    final scaled = img.copyResize(source, width: scaledW, height: scaledH);
+    final scaled = img.copyResize(source, width: scaledW, height: scaledH,
+      interpolation: img.Interpolation.linear);
     // Compute visible region
     final srcX0 = math.max(0, -px);
     final srcY0 = math.max(0, -py);
@@ -760,7 +763,8 @@ img.Image _resizeCover(img.Image source, int outW, int outH) {
     scaledH = (source.height * outW / source.width).round();
   }
 
-  final scaled = img.copyResize(source, width: scaledW, height: scaledH);
+  final scaled = img.copyResize(source, width: scaledW, height: scaledH,
+      interpolation: img.Interpolation.linear);
   final cropX = (scaledW - outW) ~/ 2;
   final cropY = (scaledH - outH) ~/ 2;
   return img.copyCrop(scaled, x: cropX, y: cropY, width: outW, height: outH);

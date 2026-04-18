@@ -79,6 +79,8 @@ class DeviceProvider extends ChangeNotifier {
 
   void disconnect() {
     _stopKeepAlive();
+    _keepAliveFailures = 0;
+    _deviceOffline = false;
     _apiClient?.dispose();
     _apiClient = null;
     _device = null;

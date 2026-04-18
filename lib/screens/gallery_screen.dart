@@ -22,6 +22,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
   bool _loadingImages = false;
   final Set<String> _selectedImages = {}; // filepaths of selected images
   bool get _isSelecting => _selectedImages.isNotEmpty;
+  bool _navigatingAway = false;
 
   @override
   void initState() {
@@ -443,8 +444,9 @@ class _GalleryScreenState extends State<GalleryScreen> {
     final battery = provider.batteryInfo;
     final sysInfo = provider.systemInfo;
 
-    // Navigate back if device goes offline
-    if (provider.deviceOffline) {
+    // Navigate back if device goes offline (once only)
+    if (provider.deviceOffline && !_navigatingAway) {
+      _navigatingAway = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           provider.disconnect();

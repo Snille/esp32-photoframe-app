@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:image/image.dart' as img;
 import 'package:provider/provider.dart';
 
 import '../providers/device_provider.dart';
@@ -80,14 +80,20 @@ class _PreviewScreenState extends State<PreviewScreen> {
       _applyFromJson(widget.initialSettings!);
     }
 
-    // Decode source image and apply EXIF orientation
-    final src = img.decodeImage(widget.imageBytes);
-    if (src != null) {
-      final oriented = img.bakeOrientation(src);
-      _srcWidth = oriented.width;
-      _srcHeight = oriented.height;
-      _orientedSourceBytes = Uint8List.fromList(img.encodePng(oriented));
-    }
+    // Use original bytes for live preview — Flutter handles EXIF natively
+    _orientedSourceBytes = widget.imageBytes;
+
+    // Show editor immediately, decode dimensions in background
+    if (mounted) setState(() => _initializing = false);
+
+    // Get image dimensions using Flutter's native decoder (fast, async)
+    final codec = await ui.instantiateImageCodec(widget.imageBytes);
+    final frame = await codec.getNextFrame();
+    _srcWidth = frame.image.width;
+    _srcHeight = frame.image.height;
+    frame.image.dispose();
+    codec.dispose();
+
     // Auto-select scale mode based on image vs display orientation
     if (_srcWidth > 0 && _srcHeight > 0) {
       final (fw, fh) = _displayDims;
@@ -98,9 +104,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
       }
     }
 
-    if (mounted) setState(() => _initializing = false);
+    if (mounted) setState(() {});
 
-    // Start dithering with device settings
+    // Start dithering
     _processImage();
   }
 

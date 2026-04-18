@@ -623,11 +623,20 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   ),
                 ),
                 if (_processing && !_isTouching)
-                  const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: SizedBox(
-                      width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      padding: const EdgeInsets.all(6),
+                      child: const CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
               ],

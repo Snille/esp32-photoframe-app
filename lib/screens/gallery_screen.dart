@@ -217,7 +217,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(image.filename),
+        title: const Text('Display Image'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

@@ -22,10 +22,17 @@ class DeviceProvider extends ChangeNotifier {
   bool _loading = false;
   String? _error;
   Timer? _keepAliveTimer;
+  Timer? _backgroundRefreshTimer;
   int _keepAliveFailures = 0;
   bool _deviceOffline = false;
 
+  // Cached device settings (refreshed every 5 min)
+  Map<String, dynamic>? _processingSettings;
+  Map<String, dynamic>? _paletteSettings;
+
   bool get deviceOffline => _deviceOffline;
+  Map<String, dynamic>? get processingSettings => _processingSettings;
+  Map<String, dynamic>? get paletteSettings => _paletteSettings;
 
   Device? get device => _device;
   ApiClient? get apiClient => _apiClient;
@@ -91,6 +98,8 @@ class DeviceProvider extends ChangeNotifier {
     _albums = [];
     _currentImage = null;
     _error = null;
+    _processingSettings = null;
+    _paletteSettings = null;
     notifyListeners();
   }
 
@@ -98,11 +107,18 @@ class DeviceProvider extends ChangeNotifier {
     _keepAliveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _sendKeepAlive();
     });
+    // Refresh settings in background every 5 minutes
+    _refreshSettingsInBackground();
+    _backgroundRefreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      _refreshSettingsInBackground();
+    });
   }
 
   void _stopKeepAlive() {
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
+    _backgroundRefreshTimer?.cancel();
+    _backgroundRefreshTimer = null;
   }
 
   Future<void> _sendKeepAlive() async {
@@ -120,6 +136,26 @@ class DeviceProvider extends ChangeNotifier {
         _deviceOffline = true;
         notifyListeners();
       }
+    }
+  }
+
+  Future<void> _refreshSettingsInBackground() async {
+    if (_apiClient == null) return;
+    try {
+      final results = await Future.wait([
+        _apiClient!.getProcessingSettings()
+            .timeout(const Duration(seconds: 5)),
+        _apiClient!.getPaletteSettings()
+            .timeout(const Duration(seconds: 5)),
+        _apiClient!.getConfig()
+            .timeout(const Duration(seconds: 5)),
+      ]);
+      _processingSettings = results[0] as Map<String, dynamic>;
+      _paletteSettings = results[1] as Map<String, dynamic>;
+      _config = DeviceConfig.fromJson(results[2] as Map<String, dynamic>);
+      notifyListeners();
+    } catch (_) {
+      // Silently ignore — cached values remain
     }
   }
 

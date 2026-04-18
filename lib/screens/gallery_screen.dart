@@ -142,52 +142,11 @@ class _GalleryScreenState extends State<GalleryScreen> {
     final picked = await picker.pickImage(source: source);
     if (picked == null || !mounted) return;
 
-    // Show loading dialog while reading image and fetching device settings
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const PopScope(
-        canPop: false,
-        child: Center(
-          child: Card(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Loading...'),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-
     final bytes = await picked.readAsBytes();
-
-    // Pre-fetch processing settings
-    Map<String, dynamic>? processingSettings;
-    final api = context.read<DeviceProvider>().apiClient;
-    if (api != null) {
-      try {
-        processingSettings = await api.getProcessingSettings()
-            .timeout(const Duration(seconds: 5));
-      } catch (_) {
-        if (mounted) {
-          Navigator.pop(context); // dismiss loading
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Device is offline. Connect to device first.')),
-          );
-        }
-        return;
-      }
-    }
-
     if (!mounted) return;
-    Navigator.pop(context); // dismiss loading
+
+    // Use cached processing settings from background refresh
+    final processingSettings = context.read<DeviceProvider>().processingSettings;
 
     final uploaded = await Navigator.push<bool>(
       context,

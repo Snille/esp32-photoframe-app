@@ -10,14 +10,14 @@ import '../services/device_discovery.dart';
 import '../services/saved_devices.dart';
 import 'provisioning_screen.dart';
 
-class DiscoveryScreen extends StatefulWidget {
-  const DiscoveryScreen({super.key});
+class DevicesScreen extends StatefulWidget {
+  const DevicesScreen({super.key});
 
   @override
-  State<DiscoveryScreen> createState() => _DiscoveryScreenState();
+  State<DevicesScreen> createState() => _DevicesScreenState();
 }
 
-class _DiscoveryScreenState extends State<DiscoveryScreen> {
+class _DevicesScreenState extends State<DevicesScreen> {
   final _discovery = DeviceDiscovery();
   List<Device> _discoveredDevices = [];
   List<Device> _savedDevices = [];

@@ -20,8 +20,8 @@ final _router = GoRouter(
       builder: (context, state) => const SplashScreen(),
     ),
     GoRoute(
-      path: '/discover',
-      builder: (context, state) => const DiscoveryScreen(),
+      path: '/devices',
+      builder: (context, state) => const DevicesScreen(),
     ),
     GoRoute(
       path: '/gallery',

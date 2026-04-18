@@ -523,7 +523,7 @@ class SettingsScreen extends StatelessWidget {
       await provider.apiClient!.sleep();
       provider.disconnect();
       if (context.mounted) {
-        context.go('/discover');
+        context.go('/devices');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Device is going to sleep')),
         );
@@ -641,7 +641,7 @@ class SettingsScreen extends StatelessWidget {
       await provider.apiClient!.factoryReset();
       provider.disconnect();
       if (context.mounted) {
-        context.go('/discover');
+        context.go('/devices');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Device has been factory reset')),
         );

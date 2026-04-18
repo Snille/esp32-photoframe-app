@@ -19,7 +19,6 @@ class DiscoveryScreen extends StatefulWidget {
 
 class _DiscoveryScreenState extends State<DiscoveryScreen> {
   final _discovery = DeviceDiscovery();
-  final _hostController = TextEditingController();
   List<Device> _discoveredDevices = [];
   List<Device> _savedDevices = [];
   Set<String> _onlineHosts = {};
@@ -107,11 +106,45 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     }
   }
 
-  void _connectManual() {
-    final host = _hostController.text.trim();
+  void _connectManual(String host) {
     if (host.isEmpty) return;
     final device = Device(name: host, host: host);
     _connectToDevice(device);
+  }
+
+  void _showManualConnectDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Manual Connection'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'IP address or hostname',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) {
+            Navigator.pop(context);
+            _connectManual(v.trim());
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _connectManual(controller.text.trim());
+            },
+            child: const Text('Connect'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _removeSavedDevice(Device device) async {
@@ -124,7 +157,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     _sub?.cancel();
     _onlineSub?.cancel();
     _discovery.dispose();
-    _hostController.dispose();
     super.dispose();
   }
 
@@ -194,14 +226,24 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     .toList();
                 return filtered.isEmpty
                   ? Center(
-                      child: Text(
-                        'No new devices found.\nTry entering the IP address manually.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'No new devices found.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: _showManualConnectDialog,
+                            child: const Text('Enter IP address manually'),
+                          ),
+                        ],
                       ),
                     )
                   : ListView.builder(
@@ -219,36 +261,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     );
               }(),
             ),
-            const Divider(),
-            const SizedBox(height: 8),
-
-            // Manual connection
-            Text(
-              'Manual Connection',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _hostController,
-                    decoration: const InputDecoration(
-                      hintText: 'IP address or hostname',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onSubmitted: (_) => _connectManual(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _connectManual,
-                  child: const Text('Connect'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
           ],
         ),
       ),

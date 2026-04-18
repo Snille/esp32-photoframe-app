@@ -258,7 +258,7 @@ class SettingsScreen extends StatelessWidget {
                 if (sysInfo != null)
                   ListTile(
                     leading: const Icon(Icons.info_outline),
-                    title: Text('${sysInfo.board}'),
+                    title: Text(sysInfo.board),
                     subtitle: Text(
                       'Firmware: ${sysInfo.firmwareVersion}\n'
                       'Display: ${sysInfo.displayWidth}\u00D7${sysInfo.displayHeight}\n'

@@ -247,42 +247,6 @@ class _GalleryScreenState extends State<GalleryScreen> {
     }
   }
 
-  Future<void> _deleteImage(PhotoInfo image) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Image'),
-        content: Text('Delete "${image.filename}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    try {
-      await context
-          .read<DeviceProvider>()
-          .apiClient!
-          .deleteImage(image.filepath);
-      _selectAlbum(_selectedAlbum!);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete: $e')),
-        );
-      }
-    }
-  }
-
   Future<void> _createAlbum() async {
     final nameController = TextEditingController();
     final name = await showDialog<String>(

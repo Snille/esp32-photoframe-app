@@ -46,7 +46,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: const Icon(Icons.arrow_back),
             onPressed: () {
               provider.disconnect();
-              context.go('/');
+              context.go('/discover');
             },
           ),
         ),
@@ -81,7 +81,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
             provider.disconnect();
-            context.go('/');
+            context.go('/discover');
           },
         ),
         actions: [

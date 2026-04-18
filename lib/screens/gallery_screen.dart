@@ -474,7 +474,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           provider.disconnect();
-          context.go('/');
+          context.go('/discover');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Device went offline')),
           );
@@ -496,7 +496,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () {
                   provider.disconnect();
-                  context.go('/');
+                  context.go('/discover');
                 },
               ),
         actions: _isSelecting

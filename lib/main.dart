@@ -6,6 +6,7 @@ import 'providers/device_provider.dart';
 import 'screens/devices_screen.dart';
 import 'screens/gallery_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() {
   runApp(const PhotoFrameApp());
@@ -16,6 +17,10 @@ final _router = GoRouter(
   routes: [
     GoRoute(
       path: '/',
+      builder: (context, state) => const SplashScreen(),
+    ),
+    GoRoute(
+      path: '/discover',
       builder: (context, state) => const DiscoveryScreen(),
     ),
     GoRoute(

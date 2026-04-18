@@ -22,7 +22,7 @@
 		<true/>
 	</dict>
 	<key>CFBundleDisplayName</key>
-	<string>ESPFrame</string>
+	<string>ESP Frame</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

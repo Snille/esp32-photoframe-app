@@ -42,7 +42,7 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'ESPFrame',
+                'ESP Frame',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       color: const Color(0xFFF0E4D0),
                       fontWeight: FontWeight.w600,

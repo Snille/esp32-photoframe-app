@@ -39,12 +39,14 @@ class PhotoFrameApp extends StatelessWidget {
       child: MaterialApp.router(
         title: 'ESP32 PhotoFrame',
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFFCE9160),
+          ),
           useMaterial3: true,
         ),
         darkTheme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.teal,
+            seedColor: const Color(0xFFCE9160),
             brightness: Brightness.dark,
           ),
           useMaterial3: true,

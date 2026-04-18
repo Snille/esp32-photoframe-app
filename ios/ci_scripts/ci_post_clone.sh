@@ -2,27 +2,28 @@
 
 # ci_post_clone.sh
 # Xcode Cloud post-clone script for Flutter iOS builds
-# This runs after the repo is cloned but before the build starts
 
 set -e
 
 echo "=== Installing Flutter SDK ==="
-# Clone Flutter SDK
 git clone https://github.com/flutter/flutter.git --depth 1 -b stable "$HOME/flutter"
 export PATH="$HOME/flutter/bin:$PATH"
 
 echo "=== Flutter Version ==="
 flutter --version
 
+echo "=== Precache iOS Artifacts ==="
+flutter precache --ios
+
 echo "=== Installing Dependencies ==="
+cd "$CI_PRIMARY_REPOSITORY_PATH"
 flutter pub get
 
-echo "=== Generating iOS Build Files ==="
-flutter precache --ios
-flutter build ios --release --no-codesign
+echo "=== Generating Flutter Build Files ==="
+flutter build ios --config-only --release --no-codesign
 
-echo "=== Installing CocoaPods Dependencies ==="
+echo "=== Installing CocoaPods ==="
 cd "$CI_PRIMARY_REPOSITORY_PATH/ios"
 pod install
 
-echo "=== Build Preparation Complete ==="
+echo "=== Preparation Complete ==="

@@ -113,9 +113,33 @@ class _GalleryScreenState extends State<GalleryScreen> {
     }
   }
 
-  Future<void> _pickAndProcess() async {
+  Future<void> _showImageSourcePicker() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source != null) _pickAndProcess(source);
+  }
+
+  Future<void> _pickAndProcess(ImageSource source) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery);
+    final picked = await picker.pickImage(source: source);
     if (picked == null || !mounted) return;
 
     // Show loading dialog while reading image and fetching device settings
@@ -665,7 +689,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _pickAndProcess,
+        onPressed: _showImageSourcePicker,
         tooltip: 'Pick & process image',
         child: const Icon(Icons.add_photo_alternate),
       ),

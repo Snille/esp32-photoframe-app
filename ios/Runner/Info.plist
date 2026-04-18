@@ -12,8 +12,17 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>This app needs local network access to discover and communicate with ESP32 PhotoFrame devices on your network.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app needs access to your photo library to select images for display on the PhotoFrame.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app needs camera access to take photos for display on the PhotoFrame.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>CFBundleDisplayName</key>
-	<string>ESP32 PhotoFrame</string>
+	<string>ESPFrame</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -21,7 +30,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>esp32_photoframe_app</string>
+	<string>PhotoFrame</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

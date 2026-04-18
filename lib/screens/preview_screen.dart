@@ -361,6 +361,12 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _debounce = Timer(const Duration(milliseconds: 400), _processImage);
   }
 
+  /// Trigger reprocessing without changing the preset (for layout/background changes).
+  void _onLayoutChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), _processImage);
+  }
+
   Future<void> _processImage({bool force = false}) async {
     // Don't process while user is actively touching in custom mode
     if (_isTouching && !force) return;
@@ -688,7 +694,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   selected: {_backgroundColor},
                   onSelectionChanged: (v) {
                     setState(() => _backgroundColor = v.first);
-                    _onParamChanged();
+                    _onLayoutChanged();
                   },
                 ),
               ],

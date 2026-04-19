@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../models/album.dart' show PhotoInfo;
 import '../providers/device_provider.dart';
 import '../services/saved_devices.dart';
+import 'ai_generation_screen.dart';
 import 'preview_screen.dart';
 
 class GalleryScreen extends StatefulWidget {
@@ -110,6 +113,34 @@ class _GalleryScreenState extends State<GalleryScreen> {
           SnackBar(content: Text('Failed: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _openAiGeneration() async {
+    final imageBytes = await Navigator.push<Uint8List>(
+      context,
+      MaterialPageRoute(builder: (_) => const AiGenerationScreen()),
+    );
+    if (imageBytes == null || !mounted) return;
+
+    // Open the image editor with the generated image
+    final processingSettings =
+        context.read<DeviceProvider>().processingSettings;
+
+    final uploaded = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PreviewScreen(
+          imageBytes: imageBytes,
+          filename: 'ai-generated-${DateTime.now().millisecondsSinceEpoch}.png',
+          album: _selectedAlbum,
+          initialSettings: processingSettings,
+        ),
+      ),
+    );
+
+    if (uploaded == true && _selectedAlbum != null && mounted) {
+      _selectAlbum(_selectedAlbum!);
     }
   }
 
@@ -611,10 +642,23 @@ class _GalleryScreenState extends State<GalleryScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showImageSourcePicker,
-        tooltip: 'Pick & process image',
-        child: const Icon(Icons.add_photo_alternate),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'ai',
+            onPressed: _openAiGeneration,
+            tooltip: 'AI generate image',
+            child: const Icon(Icons.auto_awesome),
+          ),
+          const SizedBox(height: 8),
+          FloatingActionButton(
+            heroTag: 'pick',
+            onPressed: _showImageSourcePicker,
+            tooltip: 'Pick & process image',
+            child: const Icon(Icons.add_photo_alternate),
+          ),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: 0,

@@ -539,121 +539,247 @@ class ProcessResult {
   });
 }
 
-/// Serializable result for isolate communication (PNG bytes instead of img.Image).
-class ProcessResultBytes {
-  final Uint8List previewPng;
-  final Uint8List originalPng;
-  final Uint8List epdgz;
+/// Prepared (decoded + resized) image ready for processing.
+/// Cached between parameter changes to avoid re-decoding and re-resizing.
+class PreparedImage {
+  final Uint8List rgbaData;
+  final int width;
+  final int height;
+  final Uint8List? bgMask; // 1 = background pixel, 0 = image pixel
 
-  const ProcessResultBytes({
-    required this.previewPng,
-    required this.originalPng,
-    required this.epdgz,
+  const PreparedImage({
+    required this.rgbaData,
+    required this.width,
+    required this.height,
+    this.bgMask,
   });
 }
 
-/// Parameters for isolate processing.
-class _IsolateParams {
+class _PrepareParams {
   final Uint8List imageBytes;
-  final int nativeWidth;
-  final int nativeHeight;
-  final String? orientation;
-  final ProcessingParams params;
+  final int displayWidth;
+  final int displayHeight;
   final ScaleMode scaleMode;
   final String backgroundColor;
   final double zoom;
   final double panX;
   final double panY;
+  final PalettePair palette;
 
-  const _IsolateParams({
+  const _PrepareParams({
     required this.imageBytes,
-    required this.nativeWidth,
-    required this.nativeHeight,
-    required this.orientation,
-    required this.params,
+    required this.displayWidth,
+    required this.displayHeight,
     required this.scaleMode,
     required this.backgroundColor,
     required this.zoom,
     required this.panX,
     required this.panY,
+    required this.palette,
   });
 }
 
-/// Run image processing in a background isolate.
-Future<ProcessResultBytes> processImageInBackground(
+class _ProcessParams {
+  final Uint8List rgbaData;
+  final int width;
+  final int height;
+  final Uint8List? bgMask;
+  final ProcessingParams params;
+  final bool usePerceivedOutput;
+  final int nativeWidth;
+  final int nativeHeight;
+  final String? orientation;
+  final String backgroundColor;
+  final PalettePair palette;
+
+  const _ProcessParams({
+    required this.rgbaData,
+    required this.width,
+    required this.height,
+    this.bgMask,
+    required this.params,
+    required this.usePerceivedOutput,
+    required this.nativeWidth,
+    required this.nativeHeight,
+    this.orientation,
+    required this.backgroundColor,
+    required this.palette,
+  });
+}
+
+/// Decode and resize an image in a background isolate.
+/// The result can be cached and reused across parameter changes.
+Future<PreparedImage> prepareImageInBackground(
   Uint8List imageBytes, {
-  int nativeWidth = 800,
-  int nativeHeight = 480,
-  String? orientation,
-  ProcessingParams params = const ProcessingParams(),
+  required int displayWidth,
+  required int displayHeight,
   ScaleMode scaleMode = ScaleMode.cover,
   String backgroundColor = 'white',
   double zoom = 1.0,
   double panX = 0,
   double panY = 0,
+  PalettePair palette = defaultPalette,
 }) {
-  return Isolate.run(() {
-    return _processInIsolate(_IsolateParams(
-      imageBytes: imageBytes,
-      nativeWidth: nativeWidth,
-      nativeHeight: nativeHeight,
-      orientation: orientation,
-      params: params,
-      scaleMode: scaleMode,
-      backgroundColor: backgroundColor,
-      zoom: zoom,
-      panX: panX,
-      panY: panY,
-    ));
-  });
+  return Isolate.run(() => _prepareInIsolate(_PrepareParams(
+        imageBytes: imageBytes,
+        displayWidth: displayWidth,
+        displayHeight: displayHeight,
+        scaleMode: scaleMode,
+        backgroundColor: backgroundColor,
+        zoom: zoom,
+        panX: panX,
+        panY: panY,
+        palette: palette,
+      )));
 }
 
-ProcessResultBytes _processInIsolate(_IsolateParams p) {
-  // Pre-compute oriented dimensions (matching webapp's getFrameDimensions)
-  var frameW = p.nativeWidth;
-  var frameH = p.nativeHeight;
-  final isPortrait = p.orientation == 'portrait';
-  if (isPortrait == (frameW > frameH)) {
-    final tmp = frameW;
-    frameW = frameH;
-    frameH = tmp;
+PreparedImage _prepareInIsolate(_PrepareParams p) {
+  var source = img.decodeImage(p.imageBytes);
+  if (source == null) {
+    throw ArgumentError('Failed to decode image');
+  }
+  source = img.bakeOrientation(source);
+  source.exif.imageIfd.orientation = 1;
+
+  img.Image resized;
+  List<bool>? bgMaskBool;
+
+  switch (p.scaleMode) {
+    case ScaleMode.cover:
+      resized = _resizeCover(source, p.displayWidth, p.displayHeight);
+    case ScaleMode.fit:
+      final bgColor =
+          p.palette.theoretical[p.backgroundColor] ?? p.palette.theoretical.black;
+      final result =
+          _resizeFit(source, p.displayWidth, p.displayHeight, bgColor);
+      resized = result.$1;
+      bgMaskBool = result.$2;
+    case ScaleMode.custom:
+      final bgColor =
+          p.palette.theoretical[p.backgroundColor] ?? p.palette.theoretical.black;
+      final result = _resizeCustom(
+          source, p.displayWidth, p.displayHeight, bgColor, p.zoom, p.panX, p.panY);
+      resized = result.$1;
+      bgMaskBool = result.$2;
   }
 
-  // Preview: pass oriented dims directly, no orientation flag
-  // (matches webapp — avoids native-layout rotation logic)
-  final preview = processImage(
-    p.imageBytes,
-    nativeWidth: frameW,
-    nativeHeight: frameH,
-    params: p.params,
-    usePerceivedOutput: true,
-    scaleMode: p.scaleMode,
-    backgroundColor: p.backgroundColor,
-    zoom: p.zoom,
-    panX: p.panX,
-    panY: p.panY,
+  final buf = PixelBuffer.fromImage(resized);
+
+  Uint8List? bgMask;
+  if (bgMaskBool != null) {
+    bgMask = Uint8List(bgMaskBool.length);
+    for (var i = 0; i < bgMaskBool.length; i++) {
+      if (bgMaskBool[i]) bgMask[i] = 1;
+    }
+  }
+
+  return PreparedImage(
+    rgbaData: buf.data,
+    width: buf.width,
+    height: buf.height,
+    bgMask: bgMask,
+  );
+}
+
+/// Process a prepared image for preview (perceived output) in a background isolate.
+/// Returns PNG bytes of the dithered preview.
+Future<Uint8List> processPreviewInBackground(
+  PreparedImage prepared, {
+  ProcessingParams params = const ProcessingParams(),
+  String backgroundColor = 'white',
+  PalettePair palette = defaultPalette,
+}) {
+  return Isolate.run(() => _processInIsolate(_ProcessParams(
+        rgbaData: prepared.rgbaData,
+        width: prepared.width,
+        height: prepared.height,
+        bgMask: prepared.bgMask,
+        params: params,
+        usePerceivedOutput: true,
+        nativeWidth: prepared.width,
+        nativeHeight: prepared.height,
+        backgroundColor: backgroundColor,
+        palette: palette,
+      )));
+}
+
+/// Process a prepared image for device output in a background isolate.
+/// Returns EPDGZ bytes ready to send to the device.
+Future<Uint8List> processForDeviceInBackground(
+  PreparedImage prepared, {
+  ProcessingParams params = const ProcessingParams(),
+  required int nativeWidth,
+  required int nativeHeight,
+  String? orientation,
+  String backgroundColor = 'white',
+  PalettePair palette = defaultPalette,
+}) {
+  return Isolate.run(() => _processInIsolate(_ProcessParams(
+        rgbaData: prepared.rgbaData,
+        width: prepared.width,
+        height: prepared.height,
+        bgMask: prepared.bgMask,
+        params: params,
+        usePerceivedOutput: false,
+        nativeWidth: nativeWidth,
+        nativeHeight: nativeHeight,
+        orientation: orientation,
+        backgroundColor: backgroundColor,
+        palette: palette,
+      )));
+}
+
+/// Unified processing: preprocess, dither, and encode.
+/// Returns PNG bytes for preview or EPDGZ bytes for device.
+dynamic _processInIsolate(_ProcessParams p) {
+  // Copy buffer since preprocessing modifies in place
+  final buf = PixelBuffer(Uint8List.fromList(p.rgbaData), p.width, p.height);
+
+  preprocessImage(buf, p.params, p.palette.perceived);
+
+  final outputPalette =
+      p.usePerceivedOutput ? p.palette.perceived : p.palette.theoretical;
+  final outputPaletteArray = outputPalette.toArray();
+  final ditherPaletteArray = p.palette.perceived.toArray();
+
+  applyErrorDiffusionDither(
+    buf,
+    p.params.colorMethod,
+    outputPaletteArray,
+    ditherPaletteArray,
+    p.params.ditherAlgorithm,
   );
 
-  // EPDGZ: pass native dims with orientation for rotation to panel layout
-  final device = processImage(
-    p.imageBytes,
-    nativeWidth: p.nativeWidth,
-    nativeHeight: p.nativeHeight,
-    orientation: p.orientation,
-    params: p.params,
-    usePerceivedOutput: false,
-    scaleMode: p.scaleMode,
-    backgroundColor: p.backgroundColor,
-    zoom: p.zoom,
-    panX: p.panX,
-    panY: p.panY,
-  );
+  // Clean background pixels after dithering
+  if (p.bgMask != null) {
+    final cleanBg = outputPalette[p.backgroundColor] ?? outputPalette.black;
+    final d = buf.data;
+    for (var i = 0; i < p.bgMask!.length; i++) {
+      if (p.bgMask![i] == 1) {
+        d[i * 4] = cleanBg.r;
+        d[i * 4 + 1] = cleanBg.g;
+        d[i * 4 + 2] = cleanBg.b;
+      }
+    }
+  }
 
-  return ProcessResultBytes(
-    previewPng: Uint8List.fromList(img.encodePng(preview.processed)),
-    originalPng: Uint8List.fromList(img.encodePng(preview.original)),
-    epdgz: device.epdgz,
-  );
+  if (p.usePerceivedOutput) {
+    // Preview: encode as PNG
+    return Uint8List.fromList(img.encodePng(buf.toImage()));
+  } else {
+    // Device: rotate to native layout if needed, encode as EPDGZ
+    final nativeIsLandscape = p.nativeWidth > p.nativeHeight;
+    final orientIsLandscape =
+        p.orientation == null ? nativeIsLandscape : p.orientation != 'portrait';
+    final needsRotation = nativeIsLandscape != orientIsLandscape;
+
+    if (needsRotation) {
+      final rotated = img.copyRotate(buf.toImage(), angle: 90);
+      return createEpdgz(PixelBuffer.fromImage(rotated));
+    } else {
+      return createEpdgz(buf);
+    }
+  }
 }
 
 enum ScaleMode { cover, fit, custom }

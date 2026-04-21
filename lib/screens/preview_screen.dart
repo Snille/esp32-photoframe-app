@@ -57,6 +57,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
   int _srcHeight = 0;
   Uint8List? _orientedSourceBytes; // EXIF-corrected PNG for live preview
 
+  // Cached prepared (decoded + resized) image — reused across param changes
+  epaper.PreparedImage? _prepared;
+
   // State
   bool _initializing = true; // true until settings loaded and image decoded
   bool _processing = false;
@@ -65,7 +68,6 @@ class _PreviewScreenState extends State<PreviewScreen> {
   bool _isTouching = false; // true while finger is down in custom mode
   bool _isDragging = false; // true from first touch until dithered result arrives
   Uint8List? _previewBytes;
-  Uint8List? _epdgz;
   Timer? _debounce;
 
   @override
@@ -106,8 +108,8 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
     if (mounted) setState(() {});
 
-    // Start dithering
-    _processImage();
+    // Prepare and start dithering
+    _prepareAndProcess();
   }
 
   void _applyFromJson(Map<String, dynamic> json) {
@@ -364,38 +366,30 @@ class _PreviewScreenState extends State<PreviewScreen> {
   void _onParamChanged() {
     _presetName = 'custom';
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), _processImage);
+    _debounce = Timer(const Duration(milliseconds: 400), _processPreview);
   }
 
-  /// Trigger reprocessing without changing the preset (for layout/background changes).
+  /// Trigger full re-prepare + process (for layout/scale/background changes).
   void _onLayoutChanged() {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), _processImage);
+    _debounce = Timer(const Duration(milliseconds: 400), _prepareAndProcess);
   }
 
-  Future<void> _processImage({bool force = false}) async {
-    // Don't process while user is actively touching in custom mode
+  /// Prepare (decode + resize) then process preview.
+  /// Called on initial load and layout changes (scale mode, zoom, pan, bg color).
+  Future<void> _prepareAndProcess({bool force = false}) async {
     if (_isTouching && !force) return;
 
     final generation = ++_processGeneration;
     setState(() => _processing = true);
 
-    final provider = context.read<DeviceProvider>();
-    final sysInfo = provider.systemInfo;
-    final config = provider.config;
-    final nativeWidth = sysInfo?.displayWidth ?? 800;
-    final nativeHeight = sysInfo?.displayHeight ?? 480;
-    final orientation = config?.displayOrientation;
-    final params = _buildParams();
+    final (fw, fh) = _displayDims;
 
     try {
-      // Run in background isolate to keep UI responsive
-      final result = await epaper.processImageInBackground(
+      final prepared = await epaper.prepareImageInBackground(
         widget.imageBytes,
-        nativeWidth: nativeWidth,
-        nativeHeight: nativeHeight,
-        orientation: orientation,
-        params: params,
+        displayWidth: fw,
+        displayHeight: fh,
         scaleMode: _scaleMode,
         backgroundColor: _backgroundColor,
         zoom: _zoom,
@@ -403,20 +397,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
         panY: _panY,
       );
 
-      if (!mounted) return;
-      // Ignore stale results from older processing runs
-      if (generation != _processGeneration) {
-        setState(() => _processing = false);
+      if (!mounted || generation != _processGeneration) {
+        if (mounted) setState(() => _processing = false);
         return;
       }
 
-      setState(() {
-        _previewBytes = result.previewPng;
-        _epdgz = result.epdgz;
-        _processing = false;
-        // Only clear drag state if not currently in custom mode drag
-        if (!_isTouching) _isDragging = false;
-      });
+      _prepared = prepared;
+
+      // Now process preview using the cached prepared image
+      await _processPreviewWith(prepared, generation);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -427,6 +416,54 @@ class _PreviewScreenState extends State<PreviewScreen> {
         SnackBar(content: Text('Processing failed: $e')),
       );
     }
+  }
+
+  /// Process preview only, reusing the cached prepared image.
+  /// Called on processing parameter changes (exposure, saturation, etc.).
+  Future<void> _processPreview() async {
+    if (_prepared == null) {
+      // No cached image yet, do full prepare + process
+      return _prepareAndProcess();
+    }
+
+    final generation = ++_processGeneration;
+    setState(() => _processing = true);
+
+    try {
+      await _processPreviewWith(_prepared!, generation);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _processing = false;
+        if (!_isTouching) _isDragging = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Processing failed: $e')),
+      );
+    }
+  }
+
+  /// Run preview processing on a prepared image.
+  Future<void> _processPreviewWith(
+      epaper.PreparedImage prepared, int generation) async {
+    final params = _buildParams();
+
+    final previewPng = await epaper.processPreviewInBackground(
+      prepared,
+      params: params,
+      backgroundColor: _backgroundColor,
+    );
+
+    if (!mounted || generation != _processGeneration) {
+      if (mounted) setState(() => _processing = false);
+      return;
+    }
+
+    setState(() {
+      _previewBytes = previewPng;
+      _processing = false;
+      if (!_isTouching) _isDragging = false;
+    });
   }
 
   void _showSendingDialog(String message) {
@@ -454,9 +491,27 @@ class _PreviewScreenState extends State<PreviewScreen> {
     );
   }
 
+  /// Process for device output on demand.
+  Future<Uint8List?> _processForDevice() async {
+    if (_prepared == null) return null;
+
+    final provider = context.read<DeviceProvider>();
+    final sysInfo = provider.systemInfo;
+    final config = provider.config;
+
+    return epaper.processForDeviceInBackground(
+      _prepared!,
+      params: _buildParams(),
+      nativeWidth: sysInfo?.displayWidth ?? 800,
+      nativeHeight: sysInfo?.displayHeight ?? 480,
+      orientation: config?.displayOrientation,
+      backgroundColor: _backgroundColor,
+    );
+  }
+
   /// Display on frame — stays in editor after completion.
   Future<void> _displayImage() async {
-    if (_epdgz == null) return;
+    if (_prepared == null) return;
     final api = context.read<DeviceProvider>().apiClient;
     if (api == null) return;
 
@@ -464,8 +519,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _showSendingDialog('Sending to display...');
 
     try {
+      final epdgz = await _processForDevice();
+      if (epdgz == null || !mounted) return;
+
       await api.displayImage(
-        _epdgz!,
+        epdgz,
         '${widget.filename}.epdgz',
       );
       if (!mounted) return;
@@ -486,7 +544,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   /// Upload to album — closes editor after completion.
   Future<void> _uploadToAlbum() async {
-    if (_epdgz == null) return;
+    if (_prepared == null) return;
     final api = context.read<DeviceProvider>().apiClient;
     if (api == null) return;
 
@@ -496,14 +554,21 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _showSendingDialog('Uploading to album...');
 
     try {
-      // Generate high-quality thumbnail using native image compression
-      final thumbnailJpg = await FlutterImageCompress.compressWithList(
-        widget.imageBytes,
-        minWidth: 400,
-        minHeight: 400,
-        quality: 85,
-        format: CompressFormat.jpeg,
-      );
+      // Process for device and generate thumbnail in parallel
+      final results = await Future.wait([
+        _processForDevice(),
+        FlutterImageCompress.compressWithList(
+          widget.imageBytes,
+          minWidth: 400,
+          minHeight: 400,
+          quality: 85,
+          format: CompressFormat.jpeg,
+        ),
+      ]);
+
+      final epdgz = results[0];
+      final thumbnailJpg = results[1]!;
+      if (epdgz == null || !mounted) return;
 
       final baseName = widget.filename.contains('.')
           ? widget.filename.substring(0, widget.filename.lastIndexOf('.'))
@@ -511,7 +576,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
       await api.uploadImage(
         album,
-        _epdgz!,
+        epdgz,
         '$baseName.epdgz',
         thumbnailBytes: thumbnailJpg,
         thumbnailFilename: '$baseName.jpg',
@@ -555,12 +620,12 @@ class _PreviewScreenState extends State<PreviewScreen> {
         title: const Text('Image Processing'),
         actions: [
           IconButton(
-            onPressed: _epdgz != null && !_uploading ? _displayImage : null,
+            onPressed: _prepared != null && !_uploading && !_processing ? _displayImage : null,
             icon: const Icon(Icons.cast),
             tooltip: 'Display on frame',
           ),
           IconButton(
-            onPressed: _epdgz != null && !_uploading ? _uploadToAlbum : null,
+            onPressed: _prepared != null && !_uploading && !_processing ? _uploadToAlbum : null,
             icon: const Icon(Icons.upload),
             tooltip: 'Upload to album',
           ),
@@ -596,7 +661,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                       ? (_) {
                           _debounce?.cancel();
                           setState(() => _isTouching = false);
-                          _processImage(force: true);
+                          _prepareAndProcess(force: true);
                         }
                       : null,
                   child: ClipRRect(
@@ -683,9 +748,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   _processGeneration++; // invalidate any in-flight processing
                 }
               });
-              // For cover/fit, dither immediately. For custom, wait for finger lift.
+              // For cover/fit, prepare + dither immediately. For custom, wait for finger lift.
               if (mode != epaper.ScaleMode.custom) {
-                _processImage();
+                _prepareAndProcess();
               }
             },
           ),
@@ -735,7 +800,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                     selected: _presetName == name,
                     onSelected: (_) {
                       _applyPreset(name);
-                      _processImage();
+                      _processPreview();
                     },
                   )),
               FilterChip(

@@ -8,6 +8,8 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/device_provider.dart';
+import 'package:image/image.dart' as img;
+
 import '../services/epaper/image_processor.dart' as epaper;
 import '../services/epaper/presets.dart';
 
@@ -52,12 +54,13 @@ class _PreviewScreenState extends State<PreviewScreen> {
   DitherAlgorithm _ditherAlgorithm = DitherAlgorithm.floydSteinberg;
   bool _compressDynamicRange = true;
 
-  // Source image (EXIF-corrected, decoded once)
+  // Source image (decoded once natively via dart:ui)
   int _srcWidth = 0;
   int _srcHeight = 0;
-  Uint8List? _orientedSourceBytes; // EXIF-corrected PNG for live preview
+  Uint8List? _orientedSourceBytes; // Original bytes for live preview
+  img.Image? _decodedSource; // Natively decoded, cached for reuse
 
-  // Cached prepared (decoded + resized) image — reused across param changes
+  // Cached prepared (resized to display dims) image — reused across param changes
   epaper.PreparedImage? _prepared;
 
   // State
@@ -88,17 +91,47 @@ class _PreviewScreenState extends State<PreviewScreen> {
     // Show editor immediately, decode dimensions in background
     if (mounted) setState(() => _initializing = false);
 
-    // Get image dimensions using Flutter's native decoder (fast, async)
-    final codec = await ui.instantiateImageCodec(widget.imageBytes);
+    // Decode image natively via dart:ui at ~2x display resolution.
+    // This uses the platform's native JPEG decoder (libjpeg-turbo/ImageIO)
+    // which is orders of magnitude faster than the pure Dart image package.
+    final (fw, fh) = _displayDims;
+    final targetDim = math.max(fw, fh) * 2;
+
+    // Get original dimensions to determine which axis to constrain
+    final dimsCodec = await ui.instantiateImageCodec(widget.imageBytes);
+    final dimsFrame = await dimsCodec.getNextFrame();
+    final origW = dimsFrame.image.width;
+    final origH = dimsFrame.image.height;
+    dimsFrame.image.dispose();
+    dimsCodec.dispose();
+
+    // Decode at reduced resolution — constrain the longer side
+    final codec = await ui.instantiateImageCodec(
+      widget.imageBytes,
+      targetWidth: origW > origH ? targetDim : null,
+      targetHeight: origH >= origW ? targetDim : null,
+    );
     final frame = await codec.getNextFrame();
-    _srcWidth = frame.image.width;
-    _srcHeight = frame.image.height;
-    frame.image.dispose();
+    final uiImage = frame.image;
+    _srcWidth = uiImage.width;
+    _srcHeight = uiImage.height;
+
+    // Extract raw RGBA pixels and create img.Image for processing
+    final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+    uiImage.dispose();
     codec.dispose();
+
+    if (byteData != null) {
+      _decodedSource = img.Image.fromBytes(
+        width: _srcWidth,
+        height: _srcHeight,
+        bytes: byteData.buffer,
+        numChannels: 4,
+      );
+    }
 
     // Auto-select scale mode based on image vs display orientation
     if (_srcWidth > 0 && _srcHeight > 0) {
-      final (fw, fh) = _displayDims;
       final imageIsLandscape = _srcWidth > _srcHeight;
       final displayIsLandscape = fw > fh;
       if (imageIsLandscape != displayIsLandscape) {
@@ -375,10 +408,11 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _debounce = Timer(const Duration(milliseconds: 400), _prepareAndProcess);
   }
 
-  /// Prepare (decode + resize) then process preview.
+  /// Prepare (resize/crop) then process preview.
   /// Called on initial load and layout changes (scale mode, zoom, pan, bg color).
   Future<void> _prepareAndProcess({bool force = false}) async {
     if (_isTouching && !force) return;
+    if (_decodedSource == null) return;
 
     final generation = ++_processGeneration;
     setState(() => _processing = true);
@@ -386,8 +420,9 @@ class _PreviewScreenState extends State<PreviewScreen> {
     final (fw, fh) = _displayDims;
 
     try {
-      final prepared = await epaper.prepareImageInBackground(
-        widget.imageBytes,
+      // Resize/crop the cached decoded image (no JPEG decode, synchronous)
+      final prepared = epaper.prepareFromImage(
+        _decodedSource!,
         displayWidth: fw,
         displayHeight: fh,
         scaleMode: _scaleMode,
@@ -401,7 +436,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
       _prepared = prepared;
 
-      // Now process preview using the cached prepared image
+      // Process preview (preprocess + dither, synchronous)
       await _processPreviewWith(prepared, generation);
     } catch (e) {
       if (!mounted) return;
@@ -445,7 +480,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
       epaper.PreparedImage prepared, int generation) async {
     final params = _buildParams();
 
-    final previewPng = await epaper.processPreviewInBackground(
+    final previewPng = epaper.processPreview(
       prepared,
       params: params,
       backgroundColor: _backgroundColor,

@@ -555,30 +555,6 @@ class PreparedImage {
   });
 }
 
-class _PrepareParams {
-  final Uint8List imageBytes;
-  final int displayWidth;
-  final int displayHeight;
-  final ScaleMode scaleMode;
-  final String backgroundColor;
-  final double zoom;
-  final double panX;
-  final double panY;
-  final PalettePair palette;
-
-  const _PrepareParams({
-    required this.imageBytes,
-    required this.displayWidth,
-    required this.displayHeight,
-    required this.scaleMode,
-    required this.backgroundColor,
-    required this.zoom,
-    required this.panX,
-    required this.panY,
-    required this.palette,
-  });
-}
-
 class _ProcessParams {
   final Uint8List rgbaData;
   final int width;
@@ -607,10 +583,10 @@ class _ProcessParams {
   });
 }
 
-/// Decode and resize an image in a background isolate.
-/// The result can be cached and reused across parameter changes.
-Future<PreparedImage> prepareImageInBackground(
-  Uint8List imageBytes, {
+/// Prepare from an already-decoded [img.Image] (no JPEG decode needed).
+/// Resize/crop to display dimensions based on scale mode.
+PreparedImage prepareFromImage(
+  img.Image source, {
   required int displayWidth,
   required int displayHeight,
   ScaleMode scaleMode = ScaleMode.cover,
@@ -620,45 +596,24 @@ Future<PreparedImage> prepareImageInBackground(
   double panY = 0,
   PalettePair palette = defaultPalette,
 }) {
-  return Isolate.run(() => _prepareInIsolate(_PrepareParams(
-        imageBytes: imageBytes,
-        displayWidth: displayWidth,
-        displayHeight: displayHeight,
-        scaleMode: scaleMode,
-        backgroundColor: backgroundColor,
-        zoom: zoom,
-        panX: panX,
-        panY: panY,
-        palette: palette,
-      )));
-}
-
-PreparedImage _prepareInIsolate(_PrepareParams p) {
-  var source = img.decodeImage(p.imageBytes);
-  if (source == null) {
-    throw ArgumentError('Failed to decode image');
-  }
-  source = img.bakeOrientation(source);
-  source.exif.imageIfd.orientation = 1;
-
   img.Image resized;
   List<bool>? bgMaskBool;
 
-  switch (p.scaleMode) {
+  switch (scaleMode) {
     case ScaleMode.cover:
-      resized = _resizeCover(source, p.displayWidth, p.displayHeight);
+      resized = _resizeCover(source, displayWidth, displayHeight);
     case ScaleMode.fit:
       final bgColor =
-          p.palette.theoretical[p.backgroundColor] ?? p.palette.theoretical.black;
+          palette.theoretical[backgroundColor] ?? palette.theoretical.black;
       final result =
-          _resizeFit(source, p.displayWidth, p.displayHeight, bgColor);
+          _resizeFit(source, displayWidth, displayHeight, bgColor);
       resized = result.$1;
       bgMaskBool = result.$2;
     case ScaleMode.custom:
       final bgColor =
-          p.palette.theoretical[p.backgroundColor] ?? p.palette.theoretical.black;
+          palette.theoretical[backgroundColor] ?? palette.theoretical.black;
       final result = _resizeCustom(
-          source, p.displayWidth, p.displayHeight, bgColor, p.zoom, p.panX, p.panY);
+          source, displayWidth, displayHeight, bgColor, zoom, panX, panY);
       resized = result.$1;
       bgMaskBool = result.$2;
   }
@@ -681,26 +636,28 @@ PreparedImage _prepareInIsolate(_PrepareParams p) {
   );
 }
 
-/// Process a prepared image for preview (perceived output) in a background isolate.
-/// Returns PNG bytes of the dithered preview.
-Future<Uint8List> processPreviewInBackground(
+/// Process a prepared image for preview (perceived output).
+/// Runs synchronously on the calling isolate — the buffer is small enough
+/// (display resolution) that isolate spawn + data copy overhead exceeds
+/// the compute cost.  Returns PNG bytes of the dithered preview.
+Uint8List processPreview(
   PreparedImage prepared, {
   ProcessingParams params = const ProcessingParams(),
   String backgroundColor = 'white',
   PalettePair palette = defaultPalette,
 }) {
-  return Isolate.run(() => _processInIsolate(_ProcessParams(
-        rgbaData: prepared.rgbaData,
-        width: prepared.width,
-        height: prepared.height,
-        bgMask: prepared.bgMask,
-        params: params,
-        usePerceivedOutput: true,
-        nativeWidth: prepared.width,
-        nativeHeight: prepared.height,
-        backgroundColor: backgroundColor,
-        palette: palette,
-      )));
+  return _processInIsolate(_ProcessParams(
+    rgbaData: prepared.rgbaData,
+    width: prepared.width,
+    height: prepared.height,
+    bgMask: prepared.bgMask,
+    params: params,
+    usePerceivedOutput: true,
+    nativeWidth: prepared.width,
+    nativeHeight: prepared.height,
+    backgroundColor: backgroundColor,
+    palette: palette,
+  ));
 }
 
 /// Process a prepared image for device output in a background isolate.
@@ -799,7 +756,7 @@ enum ScaleMode { cover, fit, custom }
   img.fill(output, color: img.ColorUint8.rgb(bgColor.r, bgColor.g, bgColor.b));
 
   final scaled = img.copyResize(source, width: scaledW, height: scaledH,
-      interpolation: img.Interpolation.cubic);
+      interpolation: img.Interpolation.linear);
   img.compositeImage(output, scaled, dstX: offsetX, dstY: offsetY);
 
   // Build background mask
@@ -833,7 +790,7 @@ enum ScaleMode { cover, fit, custom }
   // Scale source, then blit with clipping (handles negative offsets and overflow)
   if (scaledW > 0 && scaledH > 0) {
     final scaled = img.copyResize(source, width: scaledW, height: scaledH,
-      interpolation: img.Interpolation.cubic);
+      interpolation: img.Interpolation.linear);
     // Compute visible region
     final srcX0 = math.max(0, -px);
     final srcY0 = math.max(0, -py);
@@ -878,7 +835,7 @@ img.Image _resizeCover(img.Image source, int outW, int outH) {
   }
 
   final scaled = img.copyResize(source, width: scaledW, height: scaledH,
-      interpolation: img.Interpolation.cubic);
+      interpolation: img.Interpolation.linear);
   final cropX = (scaledW - outW) ~/ 2;
   final cropY = (scaledH - outH) ~/ 2;
   return img.copyCrop(scaled, x: cropX, y: cropY, width: outW, height: outH);

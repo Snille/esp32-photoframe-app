@@ -397,10 +397,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
         panY: _panY,
       );
 
-      if (!mounted || generation != _processGeneration) {
-        if (mounted) setState(() => _processing = false);
-        return;
-      }
+      if (!mounted || generation != _processGeneration) return;
 
       _prepared = prepared;
 
@@ -454,10 +451,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
       backgroundColor: _backgroundColor,
     );
 
-    if (!mounted || generation != _processGeneration) {
-      if (mounted) setState(() => _processing = false);
-      return;
-    }
+    if (!mounted || generation != _processGeneration) return;
 
     setState(() {
       _previewBytes = previewPng;

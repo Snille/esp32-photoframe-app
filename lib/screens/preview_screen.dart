@@ -665,12 +665,15 @@ class _PreviewScreenState extends State<PreviewScreen> {
                       if (_isDragging && _scaleMode == epaper.ScaleMode.custom && _srcWidth > 0) {
                         return _buildLiveCustomPreview();
                       }
-                      // Dithered result available: show it
-                      if (_previewBytes != null && !_processing) {
+                      // Show previous/current dithered result (spinner overlays during processing)
+                      if (_previewBytes != null) {
                         return _buildDitheredPreview();
                       }
-                      // Processing in progress: show source with spinner overlay
+                      // No dithered result yet (initial load): show live source preview
                       if (_srcWidth > 0) {
+                        if (_scaleMode == epaper.ScaleMode.custom) {
+                          return _buildLiveCustomPreview();
+                        }
                         return _buildLiveSourcePreview();
                       }
                       // Nothing decoded yet: show raw image at display aspect ratio

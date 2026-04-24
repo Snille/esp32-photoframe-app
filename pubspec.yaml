@@ -42,7 +42,6 @@ dependencies:
   shared_preferences: ^2.3.0
   wifi_scan: ^0.4.1
   wifi_iot: ^0.3.19+1
-  flutter_image_compress: ^2.3.0
   image_gallery_saver_plus: ^4.0.1
 
 dev_dependencies:

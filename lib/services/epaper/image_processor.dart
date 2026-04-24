@@ -686,6 +686,57 @@ Future<Uint8List> processForDeviceInBackground(
       )));
 }
 
+/// Encode a prepared image as a JPEG thumbnail in a background isolate.
+///
+/// The thumbnail uses the post-layout RGBA buffer from [PreparedImage],
+/// which means scaleMode (cover / fit / custom), zoom+pan, and the chosen
+/// background colour are already baked in — gallery thumbnails match what
+/// the device actually displays. Dithering is skipped so the thumbnail
+/// stays clean at small sizes.
+Future<Uint8List> generateThumbnailJpegInBackground(
+  PreparedImage prepared, {
+  int maxDimension = 400,
+  int quality = 85,
+}) {
+  return Isolate.run(() => _encodeThumbnailJpeg(
+        rgbaData: prepared.rgbaData,
+        width: prepared.width,
+        height: prepared.height,
+        maxDimension: maxDimension,
+        quality: quality,
+      ));
+}
+
+Uint8List _encodeThumbnailJpeg({
+  required Uint8List rgbaData,
+  required int width,
+  required int height,
+  required int maxDimension,
+  required int quality,
+}) {
+  // Reconstruct an img.Image from the RGBA buffer (post-layout, pre-dither).
+  final image = img.Image(width: width, height: height);
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      final i = (y * width + x) * 4;
+      image.setPixelRgba(
+          x, y, rgbaData[i], rgbaData[i + 1], rgbaData[i + 2], 255);
+    }
+  }
+
+  // Downscale so the longest side is <= maxDimension, preserving aspect.
+  final scale = math.min(maxDimension / width, maxDimension / height);
+  final img.Image output = scale < 1.0
+      ? img.copyResize(
+          image,
+          width: (width * scale).round(),
+          height: (height * scale).round(),
+        )
+      : image;
+
+  return Uint8List.fromList(img.encodeJpg(output, quality: quality));
+}
+
 /// Unified processing: preprocess, dither, and encode.
 /// Returns PNG bytes for preview or EPDGZ bytes for device.
 dynamic _processInIsolate(_ProcessParams p) {

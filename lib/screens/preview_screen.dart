@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/device_provider.dart';
@@ -583,15 +582,17 @@ class _PreviewScreenState extends State<PreviewScreen> {
     _showSendingDialog('Uploading to album...');
 
     try {
-      // Process for device and generate thumbnail in parallel
+      // Process for device and generate thumbnail in parallel.
+      // The thumbnail is encoded from the post-layout prepared image so
+      // cover / fit / custom scale modes (and zoom+pan) are reflected in
+      // the gallery preview, matching what the device actually shows.
+      if (_prepared == null) return;
       final results = await Future.wait([
         _processForDevice(),
-        FlutterImageCompress.compressWithList(
-          widget.imageBytes,
-          minWidth: 400,
-          minHeight: 400,
+        epaper.generateThumbnailJpegInBackground(
+          _prepared!,
+          maxDimension: 400,
           quality: 85,
-          format: CompressFormat.jpeg,
         ),
       ]);
 

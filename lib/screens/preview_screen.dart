@@ -600,9 +600,23 @@ class _PreviewScreenState extends State<PreviewScreen> {
       final thumbnailJpg = results[1]!;
       if (epdgz == null || !mounted) return;
 
-      final baseName = widget.filename.contains('.')
-          ? widget.filename.substring(0, widget.filename.lastIndexOf('.'))
-          : widget.filename;
+      // Derive a short, unique basename from (filename + upload timestamp)
+      // so two photos that share a name (e.g. "IMG_1234.jpg") don't collide
+      // in the device album. 32-bit FNV-1a over the payload, padded with a
+      // base-36 millisecond suffix for 12 chars total. Matches the webapp
+      // and CLI algorithms so the scheme stays consistent across clients.
+      final uploadTs = DateTime.now().millisecondsSinceEpoch;
+      final payload = '${widget.filename}:$uploadTs';
+      var fnv = 0x811c9dc5;
+      for (var i = 0; i < payload.length; i++) {
+        fnv ^= payload.codeUnitAt(i);
+        fnv = (fnv * 0x01000193) & 0xffffffff;
+      }
+      final tsSuffix = uploadTs
+          .toRadixString(36)
+          .substring(math.max(0, uploadTs.toRadixString(36).length - 4));
+      final baseName =
+          fnv.toRadixString(16).padLeft(8, '0') + tsSuffix;
 
       await api.uploadImage(
         album,

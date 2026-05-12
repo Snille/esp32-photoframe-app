@@ -13,16 +13,16 @@ Companion app for the [esp32-photoframe](https://github.com/aitjcize/esp32-photo
 - **Device settings** -- WiFi, orientation, auto-rotate, sleep schedule, OTA updates
 - **WiFi provisioning** -- set up new devices directly from the app
 
-## Testing
-
-The app is available for testing on Android and iOS.
+## Download
 
 **Android:**
 1. Join the [Google Group](https://groups.google.com/g/esp32-photoframe-app-testers)
 2. Install via [Google Play](https://play.google.com/store/apps/details?id=com.aitjcize.espframe)
 
 **iOS:**
-1. Join via [TestFlight](https://testflight.apple.com/join/Qspt5wJm)
+- [App Store](https://apps.apple.com/tw/app/esp-frame/id6762510995?l=en-GB) (USD 2.99)
+
+> The iOS version is paid because the Apple Developer Program costs USD 99/year. The price is set to help offset that recurring cost — the Android version remains free.
 
 ## Building
 

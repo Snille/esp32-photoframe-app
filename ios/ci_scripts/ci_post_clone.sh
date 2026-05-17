@@ -15,8 +15,21 @@ flutter --version
 echo "=== Precache iOS Artifacts ==="
 flutter precache --ios
 
-echo "=== Installing Dependencies ==="
+echo "=== Patching pubspec.yaml version from Xcode Cloud env ==="
 cd "$CI_PRIMARY_REPOSITORY_PATH"
+# pubspec.yaml on main holds a 0.0.0-dev placeholder; real version
+# comes from the git tag that triggered this build, with Xcode Cloud's
+# monotonic CI_BUILD_NUMBER as the build number.
+if [ -n "$CI_TAG" ] && [ -n "$CI_BUILD_NUMBER" ]; then
+  BUILD_NAME="${CI_TAG#v}"
+  echo "Setting version to ${BUILD_NAME}+${CI_BUILD_NUMBER}"
+  /usr/bin/sed -i '' -E "s/^version: .*/version: ${BUILD_NAME}+${CI_BUILD_NUMBER}/" pubspec.yaml
+  grep '^version:' pubspec.yaml
+else
+  echo "No CI_TAG or CI_BUILD_NUMBER set — leaving placeholder version (build will be 0.0.0)."
+fi
+
+echo "=== Installing Dependencies ==="
 flutter pub get
 
 echo "=== Generating Flutter Build Files ==="

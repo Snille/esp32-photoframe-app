@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
-import '../models/album.dart' show PhotoInfo;
+import '../models/album.dart' show Album, PhotoInfo;
 import '../providers/device_provider.dart';
 import '../services/saved_devices.dart';
 import 'ai_generation_screen.dart';
@@ -322,6 +322,30 @@ class _GalleryScreenState extends State<GalleryScreen> {
     }
   }
 
+  Future<void> _toggleAlbumEnabled(Album album, bool enabled) async {
+    try {
+      await context.read<DeviceProvider>().setAlbumEnabled(album.name, enabled);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(enabled
+                  ? 'Auto-rotation enabled for "${album.name}"'
+                  : 'Auto-rotation disabled for "${album.name}"'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update album: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _deleteAlbum(String albumName) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -507,39 +531,33 @@ class _GalleryScreenState extends State<GalleryScreen> {
       body: Column(
         children: [
           // Album selector
+          const SizedBox(height: 12),
           SizedBox(
-              height: 48,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                itemCount: albums.length + 1, // +1 for "new album" button
-                itemBuilder: (context, index) {
-                  if (index == albums.length) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ActionChip(
-                        avatar: const Icon(Icons.add, size: 18),
-                        label: const Text('New'),
-                        onPressed: _createAlbum,
-                      ),
-                    );
-                  }
-                  final album = albums[index];
-                  final selected = album.name == _selectedAlbum;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: GestureDetector(
-                      onLongPress: () => _deleteAlbum(album.name),
-                      child: FilterChip(
-                        label: Text(album.name),
-                        selected: selected,
-                        onSelected: (_) => _selectAlbum(album.name),
-                      ),
-                    ),
-                  );
-                },
-              ),
+            height: 44,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+              itemCount: albums.length + 1, // +1 for "new album" button
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                if (index == albums.length) {
+                  return _NewAlbumButton(onPressed: _createAlbum);
+                }
+                final album = albums[index];
+                return _AlbumChip(
+                  album: album,
+                  selected: album.name == _selectedAlbum,
+                  onTap: () => _selectAlbum(album.name),
+                  onToggleEnabled: (value) =>
+                      _toggleAlbumEnabled(album, value),
+                  onDelete: album.name == 'Default'
+                      ? null
+                      : () => _deleteAlbum(album.name),
+                );
+              },
             ),
+          ),
+          const SizedBox(height: 8),
           const Divider(height: 1),
 
           // Image grid
@@ -674,6 +692,122 @@ class _GalleryScreenState extends State<GalleryScreen> {
           NavigationDestination(
               icon: Icon(Icons.photo_library), label: 'Gallery'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
+        ],
+      ),
+    );
+  }
+}
+
+class _NewAlbumButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  const _NewAlbumButton({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: scheme.outline.withValues(alpha: 0.5)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 12, 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.add, size: 18, color: scheme.onSurface),
+              const SizedBox(width: 6),
+              Text(
+                'New',
+                style: TextStyle(color: scheme.onSurface),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AlbumChip extends StatelessWidget {
+  final Album album;
+  final bool selected;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onToggleEnabled;
+  final VoidCallback? onDelete;
+
+  const _AlbumChip({
+    required this.album,
+    required this.selected,
+    required this.onTap,
+    required this.onToggleEnabled,
+    this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final borderColor =
+        selected ? scheme.primary : scheme.outline.withValues(alpha: 0.5);
+    final background =
+        selected ? scheme.primary.withValues(alpha: 0.08) : Colors.transparent;
+
+    return Material(
+      color: background,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: borderColor),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: Checkbox(
+                value: album.enabled,
+                onChanged: (v) => onToggleEnabled(v ?? false),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(8, 6, onDelete == null ? 12 : 4, 6),
+              child: Text(
+                album.name,
+                style: TextStyle(
+                  color: selected ? scheme.primary : scheme.onSurface,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+          ),
+          if (onDelete != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: InkWell(
+                onTap: onDelete,
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close,
+                    size: 16,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

@@ -143,10 +143,9 @@ class ApiClient {
 
   Future<void> setAlbumEnabled(String name, bool enabled) async {
     final response = await _client.put(
-      _uri('/api/albums/enabled', {
-        'name': name,
-        'enabled': enabled.toString(),
-      }),
+      _uri('/api/albums/enabled', {'name': name}),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'enabled': enabled}),
     );
     _checkResponse(response);
   }

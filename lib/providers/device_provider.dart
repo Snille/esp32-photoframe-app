@@ -224,6 +224,24 @@ class DeviceProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> setAlbumEnabled(String name, bool enabled) async {
+    if (_apiClient == null) return;
+    final index = _albums.indexWhere((a) => a.name == name);
+    if (index < 0) return;
+    final previous = _albums[index];
+    _albums[index] = Album(name: previous.name, enabled: enabled);
+    notifyListeners();
+    try {
+      await _apiClient!.setAlbumEnabled(name, enabled);
+      _saveCachedAlbums();
+    } catch (e) {
+      _albums[index] = previous;
+      _error = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<void> updateConfig(Map<String, dynamic> updates) async {
     if (_apiClient == null) return;
     try {

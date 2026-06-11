@@ -139,6 +139,13 @@ class _ServerOverlayScreenState extends State<ServerOverlayScreen> {
     }
   }
 
+  /// Battery % to feed the preview so the badge renders even while editing
+  /// (real reading when known, else a placeholder so placement is visible).
+  int _batteryPercentForPreview() {
+    final b = context.read<ServerProvider>().batteryFor(widget.deviceId);
+    return b.hasData ? b.currentPercent : 100;
+  }
+
   @override
   Widget build(BuildContext context) {
     final device = ServerDevice(_d);
@@ -178,6 +185,7 @@ class _ServerOverlayScreenState extends State<ServerOverlayScreen> {
                   fit: BoxFit.contain,
                   cacheBust: _previewBust,
                   quarterTurns: device.previewQuarterTurns,
+                  batteryPercent: _batteryPercentForPreview(),
                 ),
               ),
             ),

@@ -138,6 +138,8 @@ class _DeviceCard extends StatelessWidget {
                   fit: BoxFit.contain,
                   quarterTurns: device.previewQuarterTurns,
                   cacheBust: provider.previewVersion(device.id),
+                  batteryPercent:
+                      battery.hasData ? battery.currentPercent : 100,
                 ),
               ),
             ),

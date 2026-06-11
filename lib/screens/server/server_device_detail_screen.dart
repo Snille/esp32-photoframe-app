@@ -75,6 +75,8 @@ class _ServerDeviceDetailScreenState extends State<ServerDeviceDetailScreen> {
                   fit: BoxFit.contain,
                   cacheBust: _previewBust,
                   quarterTurns: device.previewQuarterTurns,
+                  batteryPercent:
+                      battery.hasData ? battery.currentPercent : 100,
                 ),
               ),
             ),

@@ -18,6 +18,11 @@ class ServerPreview extends StatelessWidget {
   /// frame's viewing orientation (see ServerDevice.previewQuarterTurns).
   final int quarterTurns;
 
+  /// Battery percentage to report so the server renders the battery badge (the
+  /// server only draws it when a reading is present — the frame sends one on a
+  /// real fetch, the app must send one for the preview). Null = don't send.
+  final int? batteryPercent;
+
   const ServerPreview({
     super.key,
     required this.client,
@@ -26,6 +31,7 @@ class ServerPreview extends StatelessWidget {
     this.fit = BoxFit.cover,
     this.cacheBust,
     this.quarterTurns = 0,
+    this.batteryPercent,
   });
 
   @override
@@ -39,9 +45,13 @@ class ServerPreview extends StatelessWidget {
         text: s == null ? 'No server source set' : 'Not connected',
       );
     }
+    final headers = {...c.imageHeaders(host)};
+    if (batteryPercent != null) {
+      headers['X-Battery-Percentage'] = '$batteryPercent';
+    }
     final image = Image.network(
       c.previewUrl(s, cacheBust: cacheBust),
-      headers: c.imageHeaders(host),
+      headers: headers,
       fit: fit,
       gaplessPlayback: true,
       loadingBuilder: (context, child, progress) {

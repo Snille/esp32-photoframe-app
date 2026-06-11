@@ -180,6 +180,19 @@ class ServerApiClient {
     return ServerDevice(body);
   }
 
+  /// Full PUT of a device. Pass the device's own raw map with the changed
+  /// field(s) applied so no server-owned field is zeroed (the server binds
+  /// non-pointer fields). Returns the server's updated device.
+  Future<ServerDevice> updateDeviceRaw(int id, Map<String, dynamic> raw) async {
+    final data = _decode(await _client.put(
+      _u('/api/devices/$id'),
+      headers: _jsonHeaders,
+      body: jsonEncode(raw),
+    ));
+    if (data is Map) return ServerDevice(Map<String, dynamic>.from(data));
+    return ServerDevice(raw);
+  }
+
   /// Pull live state (dimensions/board/config/battery) from the frame.
   /// Requires the frame to be online.
   Future<ServerDevice> refreshDevice(int id) async {

@@ -186,6 +186,26 @@ class ServerProvider extends ChangeNotifier {
     }
   }
 
+  /// Persist a full device map (raw model JSON with edits applied) via the
+  /// server's full-device PUT. Used by the overlay editor. Returns null on
+  /// success or an error message.
+  Future<String?> saveDeviceRaw(int id, Map<String, dynamic> raw) async {
+    if (_client == null) return 'Not connected';
+    try {
+      final updated = await _client!.updateDeviceRaw(id, raw);
+      _replaceDevice(updated);
+      return null;
+    } on ServerApiException catch (e) {
+      if (e.isAuth) {
+        await disconnect();
+        return 'Session expired — please log in again';
+      }
+      return 'Save failed (${e.statusCode})';
+    } catch (e) {
+      return 'Save failed: $e';
+    }
+  }
+
   /// Pull live state from the frame (needs it online). Returns null on success
   /// or an error message (e.g. the frame is asleep / unreachable).
   Future<String?> refreshDevice(ServerDevice device) async {

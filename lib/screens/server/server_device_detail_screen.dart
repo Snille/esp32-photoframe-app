@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../models/server_models.dart';
 import '../../providers/server_provider.dart';
 import 'server_dashboard_screen.dart' show BatteryChip;
+import 'server_overlay_screen.dart';
 import 'server_preview.dart';
 
 /// Per-frame controls in server mode: live preview, source + Immich album
@@ -81,6 +82,17 @@ class _ServerDeviceDetailScreenState extends State<ServerDeviceDetailScreen> {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ServerOverlayScreen(deviceId: device.id),
+              ),
+            ),
+            icon: const Icon(Icons.tune),
+            label: const Text('Edit overlay (chips)'),
           ),
           const SizedBox(height: 24),
 

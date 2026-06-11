@@ -166,15 +166,19 @@ class _ServerOverlayScreenState extends State<ServerOverlayScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: AspectRatio(
-              aspectRatio: device.viewAspectRatio,
-              child: ServerPreview(
-                client: context.read<ServerProvider>().client,
-                host: device.host,
-                source: device.source,
-                fit: BoxFit.contain,
-                cacheBust: _previewBust,
-                quarterTurns: device.previewQuarterTurns,
+            child: Container(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              padding: const EdgeInsets.all(4),
+              child: AspectRatio(
+                aspectRatio: device.viewAspectRatio,
+                child: ServerPreview(
+                  client: context.read<ServerProvider>().client,
+                  host: device.host,
+                  source: device.source,
+                  fit: BoxFit.contain,
+                  cacheBust: _previewBust,
+                  quarterTurns: device.previewQuarterTurns,
+                ),
               ),
             ),
           ),

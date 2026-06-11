@@ -126,14 +126,19 @@ class _DeviceCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AspectRatio(
-              aspectRatio: device.viewAspectRatio,
-              child: ServerPreview(
-                client: provider.client,
-                host: device.host,
-                source: source,
-                fit: BoxFit.cover,
-                quarterTurns: device.previewQuarterTurns,
+            Container(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              padding: const EdgeInsets.all(6),
+              child: AspectRatio(
+                aspectRatio: device.viewAspectRatio,
+                child: ServerPreview(
+                  client: provider.client,
+                  host: device.host,
+                  source: source,
+                  fit: BoxFit.contain,
+                  quarterTurns: device.previewQuarterTurns,
+                  cacheBust: provider.previewVersion(device.id),
+                ),
               ),
             ),
             Padding(

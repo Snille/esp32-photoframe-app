@@ -14,6 +14,8 @@ class ServerProvider extends ChangeNotifier {
 
   List<ServerDevice> _devices = [];
   final Map<int, BatteryEstimate> _batteries = {};
+  // Bumped whenever a device changes so cached previews (keyed by URL) reload.
+  final Map<int, int> _previewVersion = {};
   List<String> _sources = [];
   List<ImmichAlbum> _albums = [];
 
@@ -31,6 +33,10 @@ class ServerProvider extends ChangeNotifier {
 
   BatteryEstimate batteryFor(int deviceId) =>
       _batteries[deviceId] ?? BatteryEstimate.empty;
+
+  /// A counter that changes whenever the device is edited — use as a preview
+  /// cache-buster so list thumbnails reload after source/album/overlay changes.
+  int previewVersion(int deviceId) => _previewVersion[deviceId] ?? 0;
 
   ServerDevice? deviceById(int id) {
     for (final d in _devices) {
@@ -145,6 +151,7 @@ class ServerProvider extends ChangeNotifier {
     final i = _devices.indexWhere((d) => d.id == updated.id);
     if (i >= 0) {
       _devices[i] = updated;
+      _previewVersion[updated.id] = previewVersion(updated.id) + 1;
       notifyListeners();
     }
   }

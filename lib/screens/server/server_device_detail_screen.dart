@@ -63,15 +63,19 @@ class _ServerDeviceDetailScreenState extends State<ServerDeviceDetailScreen> {
           // Preview
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: AspectRatio(
-              aspectRatio: device.viewAspectRatio,
-              child: ServerPreview(
-                client: provider.client,
-                host: device.host,
-                source: source,
-                fit: BoxFit.contain,
-                cacheBust: _previewBust,
-                quarterTurns: device.previewQuarterTurns,
+            child: Container(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              padding: const EdgeInsets.all(4),
+              child: AspectRatio(
+                aspectRatio: device.viewAspectRatio,
+                child: ServerPreview(
+                  client: provider.client,
+                  host: device.host,
+                  source: source,
+                  fit: BoxFit.contain,
+                  cacheBust: _previewBust,
+                  quarterTurns: device.previewQuarterTurns,
+                ),
               ),
             ),
           ),

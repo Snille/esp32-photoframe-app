@@ -125,12 +125,13 @@ class _DeviceCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             AspectRatio(
-              aspectRatio: 3 / 2,
+              aspectRatio: device.viewAspectRatio,
               child: ServerPreview(
                 client: provider.client,
                 host: device.host,
                 source: source,
                 fit: BoxFit.cover,
+                quarterTurns: device.previewQuarterTurns,
               ),
             ),
             Padding(

@@ -137,6 +137,30 @@ class ServerDevice {
     return tail.isEmpty ? null : tail;
   }
 
+  /// True when the panel's native pixels are taller than wide (e.g. the
+  /// FireBeetle 4" is natively 400×600 portrait even though mounted landscape).
+  bool get _nativePortrait => height > 0 && width > 0 && height > width;
+
+  /// How the frame is actually viewed (its mounting orientation). Falls back to
+  /// the native pixel orientation when the device didn't report one.
+  bool get viewedPortrait {
+    final o = orientation.toLowerCase();
+    if (o == 'portrait') return true;
+    if (o == 'landscape') return false;
+    return _nativePortrait;
+  }
+
+  /// Aspect ratio for displaying the preview in the app (viewing orientation).
+  double get viewAspectRatio => viewedPortrait ? 2 / 3 : 3 / 2;
+
+  /// The server rotates the composed image into the panel's native layout
+  /// (logical→native is a 90° CW turn when the two orientations differ), so the
+  /// raw preview looks sideways on a phone. Turn it back for display: 3 CW
+  /// quarter-turns (= 90° CCW) when native pixels and viewing orientation
+  /// disagree, else none.
+  int get previewQuarterTurns =>
+      (width != 0 && height != 0 && _nativePortrait != viewedPortrait) ? 3 : 0;
+
   /// Returns a copy of the raw map with [key] set to [value] — for building a
   /// safe full-device PUT body.
   Map<String, dynamic> rawWith(String key, dynamic value) {

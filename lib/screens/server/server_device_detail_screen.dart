@@ -63,13 +63,14 @@ class _ServerDeviceDetailScreenState extends State<ServerDeviceDetailScreen> {
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: AspectRatio(
-              aspectRatio: device.height > device.width ? 2 / 3 : 3 / 2,
+              aspectRatio: device.viewAspectRatio,
               child: ServerPreview(
                 client: provider.client,
                 host: device.host,
                 source: source,
                 fit: BoxFit.contain,
                 cacheBust: _previewBust,
+                quarterTurns: device.previewQuarterTurns,
               ),
             ),
           ),

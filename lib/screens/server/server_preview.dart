@@ -14,6 +14,10 @@ class ServerPreview extends StatelessWidget {
   /// Bump to force a fresh render (cache-buster). Null = let the image cache.
   final int? cacheBust;
 
+  /// Clockwise quarter-turns to apply so the panel-native preview shows in the
+  /// frame's viewing orientation (see ServerDevice.previewQuarterTurns).
+  final int quarterTurns;
+
   const ServerPreview({
     super.key,
     required this.client,
@@ -21,6 +25,7 @@ class ServerPreview extends StatelessWidget {
     required this.source,
     this.fit = BoxFit.cover,
     this.cacheBust,
+    this.quarterTurns = 0,
   });
 
   @override
@@ -34,7 +39,7 @@ class ServerPreview extends StatelessWidget {
         text: s == null ? 'No server source set' : 'Not connected',
       );
     }
-    return Image.network(
+    final image = Image.network(
       c.previewUrl(s, cacheBust: cacheBust),
       headers: c.imageHeaders(host),
       fit: fit,
@@ -52,6 +57,8 @@ class ServerPreview extends StatelessWidget {
         text: 'Preview unavailable',
       ),
     );
+    if (quarterTurns == 0) return image;
+    return RotatedBox(quarterTurns: quarterTurns, child: image);
   }
 
   Widget _placeholder(BuildContext context,

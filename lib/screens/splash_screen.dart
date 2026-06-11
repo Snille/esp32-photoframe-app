@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import '../providers/server_provider.dart';
+import '../services/server_api_client.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -12,9 +16,22 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) context.go('/devices');
-    });
+    _route();
+  }
+
+  Future<void> _route() async {
+    // Decide the landing screen: server mode if a connection was saved,
+    // otherwise the existing local device mode.
+    final saved = await ServerApiClient.loadSaved();
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    if (saved != null) {
+      // Restore in the background; the dashboard also reloads on entry.
+      context.read<ServerProvider>().restore();
+      context.go('/server');
+    } else {
+      context.go('/devices');
+    }
   }
 
   @override

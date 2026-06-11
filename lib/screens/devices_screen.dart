@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../models/device.dart';
 import '../providers/device_provider.dart';
+import '../providers/server_provider.dart';
 import '../services/device_discovery.dart';
 import '../services/saved_devices.dart';
 import 'provisioning_screen.dart';
@@ -166,6 +167,14 @@ class _DevicesScreenState extends State<DevicesScreen> {
       appBar: AppBar(
         title: const Text('ESP32 PhotoFrame'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.dns_outlined),
+            tooltip: 'Connect to server',
+            onPressed: () {
+              final connected = context.read<ServerProvider>().isConnected;
+              context.go(connected ? '/server' : '/server/login');
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
             tooltip: 'Set up new device',

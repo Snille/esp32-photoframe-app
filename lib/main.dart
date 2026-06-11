@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'providers/device_provider.dart';
 import 'providers/server_provider.dart';
+import 'providers/theme_provider.dart';
 import 'screens/devices_screen.dart';
 import 'screens/gallery_screen.dart';
 import 'screens/server/server_dashboard_screen.dart';
@@ -54,23 +55,16 @@ class PhotoFrameApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => DeviceProvider()),
         ChangeNotifierProvider(create: (_) => ServerProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()..load()),
       ],
-      child: MaterialApp.router(
-        title: 'ESP32 PhotoFrame',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFCE9160),
-          ),
-          useMaterial3: true,
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, _) => MaterialApp.router(
+          title: 'ESP32 PhotoFrame',
+          theme: themeProvider.light,
+          darkTheme: themeProvider.dark,
+          themeMode: themeProvider.mode,
+          routerConfig: _router,
         ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFCE9160),
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-        ),
-        routerConfig: _router,
       ),
     );
   }

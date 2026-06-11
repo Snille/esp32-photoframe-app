@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/server_models.dart';
 import '../../providers/server_provider.dart';
+import '../../widgets/theme_menu.dart';
 import 'server_device_detail_screen.dart';
 import 'server_preview.dart';
 
@@ -39,6 +40,7 @@ class _ServerDashboardScreenState extends State<ServerDashboardScreen> {
       appBar: AppBar(
         title: const Text('Photoframe Server'),
         actions: [
+          const ThemeMenu(),
           IconButton(
             icon: const Icon(Icons.devices_other),
             tooltip: 'Local device mode',

@@ -9,6 +9,7 @@ import '../providers/device_provider.dart';
 import '../providers/server_provider.dart';
 import '../services/device_discovery.dart';
 import '../services/saved_devices.dart';
+import '../widgets/theme_menu.dart';
 import 'provisioning_screen.dart';
 
 class DevicesScreen extends StatefulWidget {
@@ -167,6 +168,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
       appBar: AppBar(
         title: const Text('ESP32 PhotoFrame'),
         actions: [
+          const ThemeMenu(),
           IconButton(
             icon: const Icon(Icons.dns_outlined),
             tooltip: 'Connect to server',
